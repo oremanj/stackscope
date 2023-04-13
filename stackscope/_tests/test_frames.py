@@ -221,32 +221,34 @@ def test_unexpected_aexit_sequence():
         return 5  # pragma: no cover
 
     op = dis.opmap
-    if sys.version_info < (3, 9):
-        before = [op["WITH_CLEANUP_START"], 0]
-    elif sys.version_info < (3, 11):
-        before = [op["LOAD_CONST"], 0, op["DUP_TOP"], 0, op["DUP_TOP"], 0]
-        before += [op["CALL_FUNCTION"], 3]
-    else:
-        before = [op["LOAD_CONST"], 0] * 3 + [op["PRECALL"], 2, op["CACHE"], 0]
-        before += [op["CALL"], 2] + [op["CACHE"], 0] * 4
-    before += [op["GET_AWAITABLE"], 2 if sys.version_info >= (3, 11) else 0]
-    before += [op["LOAD_CONST"], 0]
-    if sys.version_info < (3, 11):
-        after = [op["YIELD_FROM"], 0]
-    else:
-        after = [op["SEND"], 3, op["YIELD_VALUE"], 0]
     co = example.__code__
-    example.__code__ = co.replace(
-        co_code=co.co_code.replace(
-            bytes(before + after),
-            bytes(before + [op["LOAD_CONST"], 0, op["POP_TOP"], 0] + after),
-        ),
-    )
+    # Insert a dummy sequence in between LOAD_CONST None and YIELD_FROM (<=3.10)
+    # or SEND (3.11+).
+    for idx, ibyte in enumerate(co.co_code):
+        if (
+            idx % 2 == 0
+            and ibyte in (op.get("YIELD_FROM"), op.get("SEND"))
+            and co.co_code[idx - 6] in (  # distinguish __aenter__ from __aexit__
+                op.get("CACHE"), op.get("CALL_FUNCTION"), op.get("WITH_CLEANUP_START")
+            )
+        ):
+            example.__code__ = co.replace(
+                co_code=co.co_code[:idx] + bytes(
+                    [op["LOAD_CONST"], 0, op["POP_TOP"], 0]
+                ) + co.co_code[idx:],
+            )
+            break
+    else:
+        assert False, "didn't find aexit sequence"
+
     coro = example()
     assert 42 == coro.send(None)
     with pytest.warns(stackscope.InspectionWarning, match="LOAD_CONST"):
         ssll.contexts_active_in_frame(coro.cr_frame)
-    coro.close()
+    # we must step the coroutine normally; coro.close() will crash on 3.12
+    # since we didn't adjust the exception table
+    with pytest.raises(StopIteration):
+        coro.send(None)
 
     if sys.version_info >= (3, 11):
         # LOAD_CONST something other than None

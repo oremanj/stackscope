@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.8-nightly', 'pypy-3.9-nightly']
+        # pypy doesn't currently work on Windows
+        python: ['3.7', '3.8', '3.9', '3.10', '3.11']
         arch: ['x86', 'x64']
         exclude:
           - python: 'pypy-3.8-nightly'

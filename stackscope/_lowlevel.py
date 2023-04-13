@@ -251,14 +251,15 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
     #     LOAD_CONST None
     #     LOAD_CONST None
     #     LOAD_CONST None
-    #     PRECALL 2
-    #     (CACHE)
+    #     PRECALL 2          \__ only on 3.11, not 3.12+
+    #     (CACHE)            /
     #     CALL 2             <-- calls __exit__(None, None, None)
-    #     (CACHE x4)
+    #     (CACHE x3-4)
     #     GET_AWAITABLE 2    \
     #     LOAD_CONST None    |
     #     SEND 3             |
-    #     YIELD_VALUE        |-- only if 'async with'
+    #     (CACHE)            | CACHE only on 3.12a6+
+    #     YIELD_VALUE [X]    |-- only if 'async with'; Y_V has oparg on 3.12+
     #     RESUME 3           |
     #     JUMP_BACKWARD_NO_IN/ERRUPT 4
     #     POP_TOP            <-- return value of __exit__ ignored
@@ -271,10 +272,12 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
     #     WITH_EXCEPT_START  <-- calls __exit__
     #     GET_AWAITABLE 2    \
     #     LOAD_CONST None    |
-    #     SEND 3             |
+    #     SEND (3-4)         |
+    #     (CACHE)            |
     #     YIELD_VALUE        |-- only if 'async with'
     #     RESUME 3           |
     #     JUMP_BACKWARD_NO_IN/ERRUPT 4
+    #     CLEANUP_THROW      only on 3.12+
     #     POP_JUMP_FORWARD_IF_TRUE 4   (jumps over the RERAISEs)
     #     RERAISE 2          reraise new_exc with lasti
     # (*) COPY 3
@@ -313,6 +316,9 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
         # Async calls have lasti pointing at YIELD_VALUE or SEND
         if code[offs] == op["YIELD_VALUE"] and offs >= 2:
             offs -= 2
+            # SEND can have a CACHE after it in 3.12
+            while code[offs] == op["CACHE"] and offs >= 2:
+                offs -= 2
             is_async = True
         if code[offs] == op["SEND"]:
             offs -= 2
@@ -405,7 +411,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
             offs -= 2
     else:
         # 3.11: either WITH_EXCEPT_START at the handler offset,
-        # or LOAD_CONST LOAD_CONST LOAD_CONST PRECALL CALL somewhere else
+        # or LOAD_CONST LOAD_CONST LOAD_CONST [PRECALL] CALL somewhere else
         if code[offs] == op["WITH_EXCEPT_START"]:
             offs -= 2  # back up to PUSH_EXC_INFO
             return ExitingContext(is_async=is_async, cleanup_offset=offs)
@@ -418,13 +424,15 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
             # other function with 3 None arguments.
             return None
         offs -= 2
-        while offs and code[offs] == op["CACHE"]:
+        if sys.version_info < (3, 12):
+            # 3.11 has PRECALL, 3.12+ doesn't
+            while offs > 4 and code[offs] == op["CACHE"]:
+                offs -= 2
+            if code[offs] != op["PRECALL"]:
+                return None
             offs -= 2
-        if offs < 4 or code[offs - 2 : offs + 2 : 2] != bytes(
-            [op["LOAD_CONST"], op["PRECALL"]]
-        ):
+        if code[offs] != op["LOAD_CONST"]:
             return None
-        offs -= 2
         for _ in range(3):
             if not backtrack_over_load_none():
                 return None
@@ -577,6 +585,7 @@ def describe_assignment_target(
                 # fmt: off
                 "LOAD_GLOBAL", "LOAD_FAST", "LOAD_NAME", "LOAD_DEREF",
                 "STORE_GLOBAL", "STORE_FAST", "STORE_NAME", "STORE_DEREF",
+                "LOAD_FAST_CHECK",
                 # fmt: on
             ):
                 stack.append(insn.argval)
@@ -595,6 +604,15 @@ def describe_assignment_target(
                 index = stack.pop()
                 container = stack.pop()
                 stack.append(f"{container}[{index}]")
+            elif insn.opname in ("BINARY_SLICE", "STORE_SLICE"):
+                if insn.arg == 3:
+                    steprepr = f":{stack.pop()}"
+                else:
+                    steprepr = ""
+                end = stack.pop()
+                start = stack.pop()
+                container = stack.pop()
+                stack.append(f"{container}[{start}:{end}{steprepr}]")
             elif insn.opname == "UNPACK_SEQUENCE":
                 values = [next_target() for _ in range(insn.argval)]
                 stack.append(format_tuple(values))
@@ -692,6 +710,7 @@ def _check_trickery_available() -> bool:
             sys.implementation.name == "pypy"
             and sys.pypy_translation_info["translation.gc"]  # type: ignore
             == "incminimark"
+            and sys.platform != "win32"  # seeing a segfault of unknown cause in CI
         )
         if _can_use_trickery:
             from contextlib import contextmanager
@@ -727,7 +746,7 @@ def _check_trickery_available() -> bool:
         else:
             warnings.warn(
                 "Inspection trickery is not supported on this interpreter: "
-                "need either CPython, or PyPy with incminimark GC. "
+                "need either CPython, or PyPy with incminimark GC on not-Windows. "
                 "Information about context managers will be less detailed. ",
                 InspectionWarning,
             )

@@ -13,6 +13,7 @@ from typing import (
     Callable,
     Iterator,
     Optional,
+    Sequence,
     TypeVar,
     Union,
     ContextManager,

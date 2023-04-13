@@ -1,3 +1,4 @@
+import bisect
 import ctypes
 import dis
 import gc
@@ -18,20 +19,48 @@ wordsize = ctypes.sizeof(ctypes.c_size_t)
 
 
 class InterpreterFrame(ctypes.Structure):
-    _fields_: List[Tuple[str, Type["ctypes._CData"]]] = [
-        ("f_func", ctypes.c_size_t),  # PyObject*
-        ("f_globals", ctypes.c_size_t),
-        ("f_builtins", ctypes.c_size_t),
-        ("f_locals", ctypes.c_size_t),
-        ("f_code", ctypes.c_size_t),  # PyCodeObject*
-        ("frame_obj", ctypes.c_size_t),  # PyFrameObject*
-        ("previous", ctypes.c_size_t),  # _PyInterpreterFrame*
-        ("prev_instr", ctypes.POINTER(ctypes.c_ushort)),
-        ("stacktop", ctypes.c_int),  # offset of TOS from localsplus, or -1
-        ("is_entry", ctypes.c_byte),
-        ("owner", ctypes.c_byte),
-        # localsplus: locals and stack start here, inline after the above header
-    ]
+    # 3.11 func, globals, builtins, locals, code, frame_obj, previous
+    # 3.12 code, previous, func, globals, builtins, locals, frame_obj
+
+    _fields_: List[Tuple[str, Type["ctypes._CData"]]] = []
+    if sys.version_info >= (3, 12):
+        _fields_ += [
+            ("f_code", ctypes.c_size_t),  # PyCodeObject*
+            ("previous", ctypes.c_size_t),  # _PyInterpreterFrame*
+            ("f_func", ctypes.c_size_t),  # PyObject*, now called f_funcobj
+            ("f_globals", ctypes.c_size_t),
+            ("f_builtins", ctypes.c_size_t),
+            ("f_locals", ctypes.c_size_t),
+            ("frame_obj", ctypes.c_size_t),  # PyFrameObject*
+            ("prev_instr", ctypes.POINTER(ctypes.c_ushort)),
+            ("stacktop", ctypes.c_int),  # offset of TOS from localsplus, or -1
+            ("yield_offset", ctypes.c_ushort),
+            ("owner", ctypes.c_byte),
+        ]
+    else:  # 3.11
+        _fields_ += [
+            ("f_func", ctypes.c_size_t),  # PyObject*
+            ("f_globals", ctypes.c_size_t),
+            ("f_builtins", ctypes.c_size_t),
+            ("f_locals", ctypes.c_size_t),
+            ("f_code", ctypes.c_size_t),  # PyCodeObject*
+            ("frame_obj", ctypes.c_size_t),  # PyFrameObject*
+            ("previous", ctypes.c_size_t),  # _PyInterpreterFrame*
+            ("prev_instr", ctypes.POINTER(ctypes.c_ushort)),
+            ("stacktop", ctypes.c_int),  # offset of TOS from localsplus, or -1
+            ("is_entry", ctypes.c_byte),
+            ("owner", ctypes.c_byte),
+        ]
+    if (3, 12) <= sys.version_info < (3, 12, 0, "alpha", 6):
+        # Fields were reordered in 3.12.0a6; handle previous alpha releases
+        # temporarily
+        f_code = _fields_.pop(0)
+        previous = _fields_.pop(0)
+        _fields_.insert(4, f_code)
+        _fields_.insert(6, previous)
+        del f_code, previous
+
+    # localsplus: locals and stack start here, inline after the above header
 
 
 class FrameObject(ctypes.Structure):
@@ -42,13 +71,8 @@ class FrameObject(ctypes.Structure):
         ("f_frame", ctypes.POINTER(InterpreterFrame)),
         ("f_trace", ctypes.c_size_t),  # PyObject*
         ("f_lineno", ctypes.c_int),
-        ("f_trace_lines", ctypes.c_byte),
-        ("f_trace_opcodes", ctypes.c_byte),
-        ("f_fast_as_locals", ctypes.c_byte),
-        ("padding", ctypes.c_byte),
-        # Storage for an InterpreterFrame comes next, but
-        # it is only actually used if the frame object outlives
-        # the function activation.
+        # There are more fields after this, but they diverge between versions
+        # and we don't care about them.
     ]
 
     extra_header_bytes = object().__sizeof__() - 2 * wordsize
@@ -233,16 +257,22 @@ def inspect_frame(frame: FrameType) -> FrameDetails:
     # Figure out the active context managers and finally blocks, by
     # using the exception table to repeatedly simulate raising an exception
     # from the location of the previous handler.
-    handler_for = {}
-    current_start: Optional[int] = None
-    for start, end, target, depth, _ in _parse_exception_table(co):
-        handler_for[start] = target, depth
-        if start <= lasti <= end:
-            current_start = start
-    while current_start in handler_for:
-        target, depth = handler_for[current_start]
-        details.blocks.append(FrameDetails.FinallyBlock(handler=target, level=depth))
-        current_start = target
+    handlers = list(_parse_exception_table(co))
+    current = lasti
+    while True:
+        # current + 1 is an invalid bytecode offset (the next would be
+        # current + 2); but it definitely comes after any handlers
+        # that start at current, and before any that start at current
+        # + 2, without worrying about the rest of the tuple
+        idx = bisect.bisect_left(handlers, (current + 1, 0))
+        if idx == 0:
+            break
+        start, end, target, depth, *_ = handlers[idx - 1]
+        if start <= current <= end:
+            details.blocks.append(FrameDetails.FinallyBlock(handler=target, level=depth))
+            current = target
+        else:
+            break
     # The above loop produced blocks in inside-out order; swap to make outside-in
     details.blocks.reverse()
 
