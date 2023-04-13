@@ -10,14 +10,35 @@ import itertools
 import sys
 import types
 import weakref
-from typing import Any, Callable, Deque, Generator, Iterable, List, Optional, Sequence, Tuple, TypeVar, Union, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Deque,
+    Generator,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+    TYPE_CHECKING,
+)
 
 if sys.version_info < (3, 11):
     from exceptiongroup import ExceptionGroup
 
 from ._types import Stack, Frame, Context, StackSlice, StackItem
 from ._code_dispatch import get_code
-from ._customization import unwrap_stackitem, elaborate_frame, unwrap_context, elaborate_context, fill_context, FrameIterator, PRUNE
+from ._customization import (
+    unwrap_stackitem,
+    elaborate_frame,
+    unwrap_context,
+    elaborate_context,
+    fill_context,
+    FrameIterator,
+    PRUNE,
+)
 from ._lowlevel import contexts_active_in_frame
 from . import _glue
 
@@ -33,9 +54,7 @@ def better_origin(candidate: object, fallback: object) -> object:
     except TypeError:
         return fallback
     else:
-        typelist = (
-            types.CoroutineType, types.GeneratorType, types.AsyncGeneratorType
-        )
+        typelist = (types.CoroutineType, types.GeneratorType, types.AsyncGeneratorType)
         if isinstance(candidate, typelist) or not isinstance(fallback, typelist):
             return candidate
         return fallback
@@ -72,7 +91,11 @@ def extract_iter(
             if isinstance(current, types.FrameType):
                 if not isinstance(
                     origin,
-                    (types.CoroutineType, types.GeneratorType, types.AsyncGeneratorType)
+                    (
+                        types.CoroutineType,
+                        types.GeneratorType,
+                        types.AsyncGeneratorType,
+                    ),
                 ):
                     origin = None
                 current = Frame(pyframe=current, origin=origin)
@@ -318,9 +341,7 @@ def extract_until(
         ):
             outer_frame = outer_frame.f_back
         if outer_frame is None:
-            raise RuntimeError(
-                f"{limit} is not an indirect caller of {inner_frame}"
-            )
+            raise RuntimeError(f"{limit} is not an indirect caller of {inner_frame}")
         return extract(StackSlice(outer=outer_frame, inner=inner_frame))
     elif isinstance(limit, int) or limit is None:
         return extract(StackSlice(inner=inner_frame, limit=limit))

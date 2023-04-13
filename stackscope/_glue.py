@@ -10,11 +10,34 @@ import threading
 import traceback
 import types
 import warnings
-from typing import Any, AsyncGenerator, Callable, Coroutine, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Type, TYPE_CHECKING, cast
+from typing import (
+    Any,
+    AsyncGenerator,
+    Callable,
+    Coroutine,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    cast,
+)
 
 from ._types import Frame, Context, StackSlice
 from ._code_dispatch import get_code
-from ._customization import unwrap_stackitem, elaborate_frame, customize, unwrap_context, elaborate_context, fill_context, yields_frames
+from ._customization import (
+    unwrap_stackitem,
+    elaborate_frame,
+    customize,
+    unwrap_context,
+    elaborate_context,
+    fill_context,
+    yields_frames,
+)
 from . import _extract
 
 try:
@@ -37,9 +60,7 @@ InstallGlueFn = Callable[[], None]
 builtin_glue_pending: Dict[str, InstallGlueFn] = {}
 
 
-def builtin_glue(needs_module: str) -> Callable[
-    [InstallGlueFn], InstallGlueFn
-]:
+def builtin_glue(needs_module: str) -> Callable[[InstallGlueFn], InstallGlueFn]:
     def decorate(fn: InstallGlueFn) -> InstallGlueFn:
         if needs_module in sys.modules and "sphinx" not in sys.modules:
             fn()
@@ -47,6 +68,7 @@ def builtin_glue(needs_module: str) -> Callable[
             assert needs_module not in builtin_glue_pending
             builtin_glue_pending[needs_module] = fn
         return fn
+
     return decorate
 
 
@@ -89,11 +111,9 @@ def get_true_caller() -> types.FrameType:
             "stackscope._tests."
         )
 
-    while (
-        caller is not None and (
-            is_mine(caller.f_globals.get("__name__", ""))
-            or caller.f_code is functools_singledispatch_wrapper
-        )
+    while caller is not None and (
+        is_mine(caller.f_globals.get("__name__", ""))
+        or caller.f_code is functools_singledispatch_wrapper
     ):
         caller = caller.f_back
     assert caller is not None
@@ -211,9 +231,9 @@ def unwrap_stackslice(spec: StackSlice) -> Iterator[types.FrameType]:
 
     if spec.limit is not None and len(frames) > spec.limit:
         if inner_frame is None and outer_frame is not None:
-            del frames[spec.limit:]
+            del frames[spec.limit :]
         else:
-            del frames[:-spec.limit]
+            del frames[: -spec.limit]
 
     yield from frames
 
@@ -390,13 +410,10 @@ def glue_contextlib() -> None:
                 start_line=context.start_line,
             )
             fill_context(child_context)
-            child_context.description = (
-                f"{tag}{stackname}.{method}({child_context.description or arg or '...'})"
-            )
+            child_context.description = f"{tag}{stackname}.{method}({child_context.description or arg or '...'})"
             children.append(child_context)
 
         context.children = children
-
 
 
 @builtin_glue("threading")
@@ -530,8 +547,7 @@ def glue_greenlet() -> None:
             # otherwise a None frame means it's running
             if glet is not greenlet_getcurrent():
                 raise RuntimeError(
-                    "Can't dump the stack of a greenlet running "
-                    "in another thread"
+                    "Can't dump the stack of a greenlet running " "in another thread"
                 )
             # since it's running in this thread, its stack is our own
             inner_frame = get_true_caller()
@@ -566,9 +582,7 @@ def glue_greenback() -> None:
     import greenback
 
     @elaborate_frame.register(greenback._impl._greenback_shim)
-    def elaborate_greenback_shim(
-        frame: Frame, next_inner: object
-    ) -> object:
+    def elaborate_greenback_shim(frame: Frame, next_inner: object) -> object:
         frame.hide = True
 
         if isinstance(next_inner, Frame):
@@ -595,9 +609,7 @@ def glue_greenback() -> None:
             )
 
     @elaborate_frame.register(greenback.await_)
-    def elaborate_greenback_await(
-        frame: Frame, next_inner: object
-    ) -> object:
+    def elaborate_greenback_await(frame: Frame, next_inner: object) -> object:
         frame.hide = True
 
         if (
@@ -620,4 +632,3 @@ def glue_greenback() -> None:
     @unwrap_context.register(greenback.async_context)
     def unwrap_greenback_async_context(manager: Any) -> Any:
         return manager._cm
-

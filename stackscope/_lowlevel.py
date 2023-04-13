@@ -26,7 +26,16 @@ from typing import (
 from ._types import Context
 
 
-__all__ = ["FrameDetails", "ExitingContext", "inspect_frame", "currently_exiting_context", "describe_assignment_target", "analyze_with_blocks", "contexts_active_in_frame", "set_trickery_enabled"]
+__all__ = [
+    "FrameDetails",
+    "ExitingContext",
+    "inspect_frame",
+    "currently_exiting_context",
+    "describe_assignment_target",
+    "analyze_with_blocks",
+    "contexts_active_in_frame",
+    "set_trickery_enabled",
+]
 
 
 class InspectionWarning(RuntimeWarning):
@@ -49,6 +58,7 @@ class FrameDetails:
         code object. On earlier CPython and all PyPy, they are
         directly tracked at runtime by the frame object.
         """
+
         handler: int
         level: int
 
@@ -85,11 +95,13 @@ class ExitingContext:
     """Information about the sync or async context manager that's
     currently being exited in a frame.
     """
+
     is_async: bool
     cleanup_offset: int
 
 
 if sys.version_info >= (3, 11):
+
     def _parse_varint(it: Iterator[int]) -> int:
         b = next(it)
         val = b & 63
@@ -99,10 +111,9 @@ if sys.version_info >= (3, 11):
             val |= b & 63
         return val
 
-
-    def _parse_exception_table(code: types.CodeType) -> Iterator[
-        Tuple[int, int, int, int, bool]
-    ]:
+    def _parse_exception_table(
+        code: types.CodeType,
+    ) -> Iterator[Tuple[int, int, int, int, bool]]:
         it = iter(code.co_exceptiontable)
         try:
             while True:
@@ -240,14 +251,15 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
     #     LOAD_CONST None
     #     LOAD_CONST None
     #     LOAD_CONST None
-    #     PRECALL 2
-    #     (CACHE)
+    #     PRECALL 2          \__ only on 3.11, not 3.12+
+    #     (CACHE)            /
     #     CALL 2             <-- calls __exit__(None, None, None)
-    #     (CACHE x4)
+    #     (CACHE x3-4)
     #     GET_AWAITABLE 2    \
     #     LOAD_CONST None    |
     #     SEND 3             |
-    #     YIELD_VALUE        |-- only if 'async with'
+    #     (CACHE)            | CACHE only on 3.12a6+
+    #     YIELD_VALUE [X]    |-- only if 'async with'; Y_V has oparg on 3.12+
     #     RESUME 3           |
     #     JUMP_BACKWARD_NO_IN/ERRUPT 4
     #     POP_TOP            <-- return value of __exit__ ignored
@@ -260,10 +272,14 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
     #     WITH_EXCEPT_START  <-- calls __exit__
     #     GET_AWAITABLE 2    \
     #     LOAD_CONST None    |
-    #     SEND 3             |
+    #     SEND (3-4)         |
+    #     (CACHE)            |
     #     YIELD_VALUE        |-- only if 'async with'
     #     RESUME 3           |
     #     JUMP_BACKWARD_NO_IN/ERRUPT 4
+    #     CLEANUP_THROW      only on 3.12+
+    #     SWAP 2             \__ only if 'async with' on 3.12.0a6+
+    #     POP_TOP            /
     #     POP_JUMP_FORWARD_IF_TRUE 4   (jumps over the RERAISEs)
     #     RERAISE 2          reraise new_exc with lasti
     # (*) COPY 3
@@ -302,6 +318,9 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
         # Async calls have lasti pointing at YIELD_VALUE or SEND
         if code[offs] == op["YIELD_VALUE"] and offs >= 2:
             offs -= 2
+            # SEND can have a CACHE after it in 3.12
+            while code[offs] == op["CACHE"] and offs >= 2:
+                offs -= 2
             is_async = True
         if code[offs] == op["SEND"]:
             offs -= 2
@@ -329,7 +348,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
             # If LOAD_CONST had an EXTENDED_ARG then skip over those.
             # This is very unlikely -- would require none of the first
             # 256 constants used in a function to be None.
-            arg |= (code[offs + 1] << shift)
+            arg |= code[offs + 1] << shift
             shift += 8
             offs -= 2
         return frame.f_code.co_consts[arg] is None
@@ -394,7 +413,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
             offs -= 2
     else:
         # 3.11: either WITH_EXCEPT_START at the handler offset,
-        # or LOAD_CONST LOAD_CONST LOAD_CONST PRECALL CALL somewhere else
+        # or LOAD_CONST LOAD_CONST LOAD_CONST [PRECALL] CALL somewhere else
         if code[offs] == op["WITH_EXCEPT_START"]:
             offs -= 2  # back up to PUSH_EXC_INFO
             return ExitingContext(is_async=is_async, cleanup_offset=offs)
@@ -407,13 +426,15 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
             # other function with 3 None arguments.
             return None
         offs -= 2
-        while offs and code[offs] == op["CACHE"]:
+        if sys.version_info < (3, 12):
+            # 3.11 has PRECALL, 3.12+ doesn't
+            while offs > 4 and code[offs] == op["CACHE"]:
+                offs -= 2
+            if code[offs] != op["PRECALL"]:
+                return None
             offs -= 2
-        if offs < 4 or code[offs - 2 : offs + 2 : 2] != bytes(
-            [op["LOAD_CONST"], op["PRECALL"]]
-        ):
+        if code[offs] != op["LOAD_CONST"]:
             return None
-        offs -= 2
         for _ in range(3):
             if not backtrack_over_load_none():
                 return None
@@ -427,8 +448,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
         # Neither of these are covered by the exception handler block.
         for _, end, target, *_ in _parse_exception_table(frame.f_code):
             if end == offs or (
-                end == offs - 2
-                and code[offs] in (op["SWAP"], op["NOP"])
+                end == offs - 2 and code[offs] in (op["SWAP"], op["NOP"])
             ):
                 return ExitingContext(is_async=is_async, cleanup_offset=target)
         warnings.warn(
@@ -506,7 +526,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
                 op["SETUP_WITH"],
                 op["SETUP_ASYNC_WITH"],
             ):
-               stack.append(offs + 2 + arg * jmul)
+                stack.append(offs + 2 + arg * jmul)
         if code[offs] == op["POP_BLOCK"]:
             if offs == pop_block_offs:
                 # We found the one we're looking for!
@@ -533,7 +553,8 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
 
 
 def describe_assignment_target(
-    insns: List[dis.Instruction], start_idx: int,
+    insns: List[dis.Instruction],
+    start_idx: int,
 ) -> Optional[str]:
     """Given that ``insns[start_idx]`` and beyond constitute a series of
     instructions that assign the top-of-stack value somewhere, this
@@ -566,6 +587,7 @@ def describe_assignment_target(
                 # fmt: off
                 "LOAD_GLOBAL", "LOAD_FAST", "LOAD_NAME", "LOAD_DEREF",
                 "STORE_GLOBAL", "STORE_FAST", "STORE_NAME", "STORE_DEREF",
+                "LOAD_FAST_CHECK",
                 # fmt: on
             ):
                 stack.append(insn.argval)
@@ -584,6 +606,15 @@ def describe_assignment_target(
                 index = stack.pop()
                 container = stack.pop()
                 stack.append(f"{container}[{index}]")
+            elif insn.opname in ("BINARY_SLICE", "STORE_SLICE"):
+                if insn.arg == 3:
+                    steprepr = f":{stack.pop()}"
+                else:
+                    steprepr = ""
+                end = stack.pop()
+                start = stack.pop()
+                container = stack.pop()
+                stack.append(f"{container}[{start}:{end}{steprepr}]")
             elif insn.opname == "UNPACK_SEQUENCE":
                 values = [next_target() for _ in range(insn.argval)]
                 stack.append(format_tuple(values))
@@ -681,6 +712,7 @@ def _check_trickery_available() -> bool:
             sys.implementation.name == "pypy"
             and sys.pypy_translation_info["translation.gc"]  # type: ignore
             == "incminimark"
+            and sys.platform != "win32"  # seeing a segfault of unknown cause in CI
         )
         if _can_use_trickery:
             from contextlib import contextmanager
@@ -716,7 +748,7 @@ def _check_trickery_available() -> bool:
         else:
             warnings.warn(
                 "Inspection trickery is not supported on this interpreter: "
-                "need either CPython, or PyPy with incminimark GC. "
+                "need either CPython, or PyPy with incminimark GC on not-Windows. "
                 "Information about context managers will be less detailed. ",
                 InspectionWarning,
             )
@@ -757,15 +789,19 @@ def analyze_with_blocks(code: types.CodeType) -> Dict[int, Context]:
                 start_line=current_line,
             )
         elif sys.version_info >= (3, 11) and insn.opname in (
-            "BEFORE_WITH", "BEFORE_ASYNC_WITH"
+            "BEFORE_WITH",
+            "BEFORE_ASYNC_WITH",
         ):
-            is_async = (insn.opname == "BEFORE_ASYNC_WITH")
+            is_async = insn.opname == "BEFORE_ASYNC_WITH"
             # 7: BEFORE_ASYNC_WITH, GET_AWAITABLE 1, LOAD_CONST None, SEND 3,
             #    YIELD_VALUE, RESUME 3, JUMP_BACKWARD_NO_INTERRUPT 4
             skip_insns = 7 if is_async else 1
             # Allow for EXTENDED_ARG(s) before LOAD_CONST None
             while is_async and insns[idx + skip_insns - 5].opname == "EXTENDED_ARG":
                 skip_insns += 1
+            if is_async and sys.version_info >= (3, 12, 0, "alpha", 6):
+                # SEND stackeffect changed, resulting in an extra SWAP 2 + POP_TOP
+                skip_insns += 2
             store_to = describe_assignment_target(insns, idx + skip_insns)
             cleanup_offset = start_to_handler[insns[idx + skip_insns].offset]
             with_block_info[cleanup_offset] = Context(
@@ -778,7 +814,9 @@ def analyze_with_blocks(code: types.CodeType) -> Dict[int, Context]:
 
 
 def contexts_active_in_frame(
-    frame: types.FrameType, origin: Any = None, next_inner: Optional[types.FrameType] = None
+    frame: types.FrameType,
+    origin: Any = None,
+    next_inner: Optional[types.FrameType] = None,
 ) -> List[Context]:
     """Inspects the given *frame* to try to determine which context
     managers are currently active; returns a list of
@@ -897,9 +935,7 @@ def _contexts_active_by_trickery(frame: types.FrameType) -> List[Context]:
         for block in with_blocks
     ]
     if exiting is not None:
-        ret.append(
-            replace(with_block_info[exiting.cleanup_offset], is_exiting=True)
-        )
+        ret.append(replace(with_block_info[exiting.cleanup_offset], is_exiting=True))
     locals_by_id = {}
     for name, value in frame.f_locals.items():
         locals_by_id[id(value)] = name

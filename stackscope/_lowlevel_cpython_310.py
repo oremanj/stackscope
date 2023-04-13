@@ -146,7 +146,8 @@ def inspect_frame(frame: FrameType) -> FrameDetails:
             and (
                 # EXCEPT_HANDLER blocks (type 257) can have a bogus b_handler
                 (-1 if block.b_type == 257 else 0)
-                <= block.b_handler * offset_mult < len(co.co_code)
+                <= block.b_handler * offset_mult
+                < len(co.co_code)
             )
             and 0 <= block.b_level <= len(stack)
         )

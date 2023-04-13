@@ -10,10 +10,22 @@ from functools import partial
 from typing import List, Callable, Any, cast
 
 import pytest
+
 if sys.version_info < (3, 11):
     from exceptiongroup import ExceptionGroup
 
-from stackscope import Stack, StackSlice, customize, elaborate_frame, extract, extract_since, extract_until, extract_outermost, unwrap_stackitem, unwrap_context
+from stackscope import (
+    Stack,
+    StackSlice,
+    customize,
+    elaborate_frame,
+    extract,
+    extract_since,
+    extract_until,
+    extract_outermost,
+    unwrap_stackitem,
+    unwrap_context,
+)
 
 
 def remove_address_details(line):
@@ -33,7 +45,9 @@ def flatten(frames):
             line = clean_line(summary.line)
             if context_info:
                 if ":" in context_info:
-                    context_name, context_typename = context_info.strip(" ()").split(": ")
+                    context_name, context_typename = context_info.strip(" ()").split(
+                        ": "
+                    )
                     if context_name == "_":
                         context_name = None
                     yield func, line, context_name, context_typename
@@ -147,7 +161,6 @@ except ImportError:
 
     def try_in_other_greenlet_too(fn):
         return fn
-
 
 else:
 
@@ -362,7 +375,9 @@ def test_greenlet():
     greenlet = pytest.importorskip("greenlet")
 
     stack_main = extract(greenlet.getcurrent())
-    assert stack_main.error is None and stack_main.frames[-1].funcname == "test_greenlet"
+    assert (
+        stack_main.error is None and stack_main.frames[-1].funcname == "test_greenlet"
+    )
 
     def outer():
         with outer_context():
@@ -613,7 +628,9 @@ def test_running_in_thread():
                 or stack.frames[-1].funcname != "wait"
             ):  # pragma: no cover
                 stack.frames = stack.frames[:-1]
-            while stack.frames[-1].filename.endswith("threading.py"):  # pragma: no cover
+            while stack.frames[-1].filename.endswith(
+                "threading.py"
+            ):  # pragma: no cover
                 stack.frames = stack.frames[:-1]
 
             assert_stack_matches(
@@ -1049,7 +1066,12 @@ def test_greenback() -> None:
     assert_stack_matches(
         results[0],
         [
-            ("greenback_shim", "return await _greenback_shim(orig_coro)", None, None,),
+            (
+                "greenback_shim",
+                "return await _greenback_shim(orig_coro)",
+                None,
+                None,
+            ),
             ("main", "return await outer()", None, None),
             (
                 "outer",
@@ -1078,7 +1100,12 @@ def test_greenback() -> None:
     assert_stack_matches(
         results[1],
         [
-            ("greenback_shim", "return await _greenback_shim(orig_coro)", None, None,),
+            (
+                "greenback_shim",
+                "return await _greenback_shim(orig_coro)",
+                None,
+                None,
+            ),
             ("main", "return await outer()", None, None),
             (
                 "outer",
@@ -1197,9 +1224,7 @@ def test_asyncexitstack_formatting(asynccontextmanager):
     elif sys.version_info >= (3, 9, 7):
         # @asynccontextmanager deletes its func/args/kwds when entering
         # after this version, but didn't before
-        expect_name = (
-            "test_asyncexitstack_formatting.<locals>.amgr(...)"
-        )
+        expect_name = "test_asyncexitstack_formatting.<locals>.amgr(...)"
     else:
         expect_name = (
             "stackscope._tests.test_traceback.test_asyncexitstack_formatting."
@@ -1259,8 +1284,8 @@ def test_acm_exiting(asynccontextmanager):
 
     if asynccontextmanager.__module__ != "contextlib":
         acm_entry = [
-            ('__aexit__', 'async with aclosing(self._agen):', None, 'aclosing'),
-            ('__aexit__', 'await self._agen.asend(None)', None, None),
+            ("__aexit__", "async with aclosing(self._agen):", None, "aclosing"),
+            ("__aexit__", "await self._agen.asend(None)", None, None),
         ]
     elif sys.version_info < (3, 10):
         acm_entry = [("__aexit__", "await self.gen.__anext__()", None, None)]
@@ -1294,8 +1319,10 @@ def test_unwrap_loops(local_registry: None) -> None:
     class CM:
         def __enter__(self) -> None:
             pass
+
         def __exit__(self, *exc: object) -> None:
             pass
+
         def __repr__(self) -> str:
             return "<CM>"
 
@@ -1312,7 +1339,9 @@ def test_unwrap_loops(local_registry: None) -> None:
         with CM():
             result = extract_since(sys._getframe(1))
             assert type(result.error).__name__ == "ExceptionGroup"
-            assert "multiple errors encountered while extracting" in result.error.message
+            assert (
+                "multiple errors encountered while extracting" in result.error.message
+            )
             messages = sorted(str(ex) for ex in result.error.exceptions)
             assert len(messages) == 2
             assert "42 has been unwrapped" in messages[0]
@@ -1401,4 +1430,3 @@ def test_extract_outermost(local_registry: None) -> None:
 
     with pytest.raises(RuntimeError, match="unwrapping only reached 'hello'"):
         extract_outermost("hello")
-

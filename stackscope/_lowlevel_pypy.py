@@ -64,7 +64,7 @@ def _pypy_typename_from_first_word(first_word: int) -> str:
     whose first word in memory (8 bytes on 64-bit, 4 bytes on 32-bit) has the
     value *first_word*.
     """
-    if sys.maxsize > 2 ** 32:
+    if sys.maxsize > 2**32:
         mask = 0xFFFFFFFF
     else:
         mask = 0xFFFF
