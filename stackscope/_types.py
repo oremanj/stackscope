@@ -8,7 +8,19 @@ import types
 import weakref
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, ContextManager, Iterator, List, Optional, Sequence, Tuple, Union, TYPE_CHECKING, cast
+from typing import (
+    Any,
+    Awaitable,
+    ContextManager,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    TYPE_CHECKING,
+    cast,
+)
 
 
 __all__ = ["Stack", "Frame", "Context", "StackSlice", "StackItem"]
@@ -19,6 +31,7 @@ __all__ = ["Stack", "Frame", "Context", "StackSlice", "StackItem"]
 if TYPE_CHECKING:
     StackItem = object  # so mypy doesn't complain
 else:
+
     class StackItem:  # so it shows as StackItem in sphinx docs, etc
         """Placeholder used in type hints to mean "anything you can pass to
         :func:`extract`."
@@ -225,9 +238,8 @@ class Frame(Formattable):
                 return None
         except Exception:
             return None
-        return (
-            getattr(self_type, "__qualname__", None)
-            or getattr(self_type, "__name__", None)
+        return getattr(self_type, "__qualname__", None) or getattr(
+            self_type, "__name__", None
         )
 
     @property
@@ -365,7 +377,9 @@ class Frame(Formattable):
 
         """
         for context in self.contexts:
-            yield from context._frame_summaries(self, show_hidden_frames, capture_locals)
+            yield from context._frame_summaries(
+                self, show_hidden_frames, capture_locals
+            )
         # If the last context manager is currently exiting, then don't
         # include an additional traceback entry for the frame it's
         # running in; it would either be the same 'with' statement we
@@ -406,9 +420,7 @@ class Context(Formattable):
         override_line: Optional[str] = None,
     ) -> Iterator[traceback.FrameSummary]:
         if capture_locals:
-            save_locals = {
-                "<context manager>": self.description or repr(self.obj)
-            }
+            save_locals = {"<context manager>": self.description or repr(self.obj)}
         else:
             save_locals = None
         info = self._name_and_type()
@@ -421,11 +433,16 @@ class Context(Formattable):
         )
         if self.inner_stack is not None:
             yield from self.inner_stack._frame_summaries(
-                show_contexts=True, show_hidden_frames=show_hidden_frames, capture_locals=capture_locals
+                show_contexts=True,
+                show_hidden_frames=show_hidden_frames,
+                capture_locals=capture_locals,
             )
         for subctx in self.children:
             yield from subctx._frame_summaries(
-                parent, show_hidden_frames, capture_locals, "# " + (subctx.description or repr(subctx))
+                parent,
+                show_hidden_frames,
+                capture_locals,
+                "# " + (subctx.description or repr(subctx)),
             )
 
     def _format(
@@ -511,6 +528,7 @@ class StackSlice:
       the frame that made the call to :func:`stackscope.extract`.
 
     """
+
     outer: Optional[types.FrameType] = None
     inner: Optional[types.FrameType] = None
     limit: Optional[int] = None

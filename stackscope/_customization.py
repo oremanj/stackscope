@@ -8,7 +8,18 @@ import functools
 import gc
 import sys
 import types
-from typing import Any, Callable, Iterator, Optional, TypeVar, Union, ContextManager, AsyncContextManager, overload, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Iterator,
+    Optional,
+    TypeVar,
+    Union,
+    ContextManager,
+    AsyncContextManager,
+    overload,
+    TYPE_CHECKING,
+)
 from typing_extensions import ParamSpec
 
 from ._code_dispatch import code_dispatch
@@ -18,7 +29,16 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-__all__ = ["unwrap_stackitem", "elaborate_frame", "unwrap_context", "elaborate_context", "customize", "fill_context", "yields_frames", "PRUNE"]
+__all__ = [
+    "unwrap_stackitem",
+    "elaborate_frame",
+    "unwrap_context",
+    "elaborate_context",
+    "customize",
+    "fill_context",
+    "yields_frames",
+    "PRUNE",
+]
 
 
 class _Prune:
@@ -57,13 +77,14 @@ def yields_frames(fn: Callable[P, Iterator[T]]) -> Callable[P, FrameIterator[T]]
     @functools.wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> FrameIterator[T]:
         return FrameIterator(fn(*args, **kwargs))
+
     return wrapper
 
 
 @functools.singledispatch
-def unwrap_stackitem(item: StackItem) -> Union[
-    StackItem, Sequence[StackItem], FrameIterator[StackItem], None
-]:
+def unwrap_stackitem(
+    item: StackItem,
+) -> Union[StackItem, Sequence[StackItem], FrameIterator[StackItem], None]:
     """Hook for turning something encountered during stack traversal into
     one or more objects that are easier to understand than it, eventually
     resulting in a Python frame. May return a single object, a sequence of
@@ -154,6 +175,7 @@ def fill_context(context: Context) -> None:
     for _ in range(100):
         if TYPE_CHECKING:
             from typing import ContextManager, AsyncContextManager
+
             assert isinstance(context.obj, (ContextManager, AsyncContextManager))
         elaborate_context(context.obj, context)
         inner_mgr = unwrap_context(context.obj)

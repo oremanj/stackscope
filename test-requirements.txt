@@ -1,10 +1,12 @@
 trio
 async_exit_stack
 async_generator
-greenback
+# greenlet doesn't build on 3.12-dev yet
+greenlet; python_version < '3.12'
+greenback; python_version < '3.12'
 
 # Testing
-pytest >= 6.0
+pytest
 pytest-cov
 pytest-trio
 

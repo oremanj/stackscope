@@ -241,9 +241,7 @@ def inspect_frame(frame: FrameType) -> FrameDetails:
             current_start = start
     while current_start in handler_for:
         target, depth = handler_for[current_start]
-        details.blocks.append(
-            FrameDetails.FinallyBlock(handler=target, level=depth)
-        )
+        details.blocks.append(FrameDetails.FinallyBlock(handler=target, level=depth))
         current_start = target
     # The above loop produced blocks in inside-out order; swap to make outside-in
     details.blocks.reverse()

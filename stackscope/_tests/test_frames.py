@@ -32,7 +32,9 @@ def test_trickery_unavailable(monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(sys.implementation, "name", "unsupported")
         m.setattr(ssll, "_can_use_trickery", None)
-        with pytest.warns(stackscope.InspectionWarning, match="trickery is not supported"):
+        with pytest.warns(
+            stackscope.InspectionWarning, match="trickery is not supported"
+        ):
             ssll.contexts_active_in_frame(sys._getframe(0))
 
     def boom(frame):
@@ -48,7 +50,9 @@ def test_trickery_unavailable(monkeypatch):
 
     with monkeypatch.context() as m:
         m.setattr(ssll, "_contexts_active_by_trickery", boom)
-        with pytest.warns(stackscope.InspectionWarning, match="trickery failed on frame"):
+        with pytest.warns(
+            stackscope.InspectionWarning, match="trickery failed on frame"
+        ):
             ssll.contexts_active_in_frame(sys._getframe(0))
 
     with monkeypatch.context() as m:
@@ -264,7 +268,9 @@ def test_unexpected_aexit_sequence():
             co_code=co.co_code.replace(
                 # add a no-op push/pop before LOAD_CONST None
                 bytes([op["LOAD_CONST"], 0] * 3),
-                bytes([op["LOAD_CONST"], 0, op["POP_TOP"], 0] + [op["LOAD_CONST"], 0] * 3),
+                bytes(
+                    [op["LOAD_CONST"], 0, op["POP_TOP"], 0] + [op["LOAD_CONST"], 0] * 3
+                ),
             )
         )
         coro = example()
@@ -367,8 +373,6 @@ def test_assignment_targets():
         coro = ns["example"]()
         assert 42 == coro.send(None)
         assert ssll.contexts_active_in_frame(coro.cr_frame) == [
-            stackscope.Context(
-                is_async=False, obj=C(1), varname=None, start_line=2
-            ),
+            stackscope.Context(is_async=False, obj=C(1), varname=None, start_line=2),
         ]
         coro.close()

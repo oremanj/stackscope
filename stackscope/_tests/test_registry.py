@@ -28,7 +28,10 @@ def test_identity_dict() -> None:
     assert IdentityDict([(1, 2), (3, 4)]) == {1: 2, 3: 4}
     assert idict == rev
     assert idict != IdentityDict([(c2, 1), (c1, 2)])
-    assert repr(idict) == f"IdentityDict([({Cell_name}(value=10), 1), ({Cell_name}(value=10), 2)])"
+    assert (
+        repr(idict)
+        == f"IdentityDict([({Cell_name}(value=10), 1), ({Cell_name}(value=10), 2)])"
+    )
     assert len(idict) == 2
     assert list(map(id, iter(idict))) == [id(c1), id(c2)]
 
@@ -161,7 +164,9 @@ def test_registration_through_nested(local_registry):
     middle_fn = outer_fn(1)
     inner_fn = middle_fn()
     assert not inner_fn()
-    stackscope.customize(outer_fn, "middle_fn", "inner_fn", elaborate=simple_elaborate_frame)
+    stackscope.customize(
+        outer_fn, "middle_fn", "inner_fn", elaborate=simple_elaborate_frame
+    )
     assert inner_fn()
 
 

@@ -6,7 +6,21 @@ import functools
 import inspect
 import sys
 import types
-from typing import Any, Callable, Generic, Iterable, Iterator, MutableMapping, Tuple, TypeVar, Union, Optional, cast, overload, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Tuple,
+    TypeVar,
+    Union,
+    Optional,
+    cast,
+    overload,
+    TYPE_CHECKING,
+)
 from typing_extensions import Concatenate, ParamSpec
 
 K = TypeVar("K")
@@ -22,7 +36,7 @@ if not TYPE_CHECKING and sys.implementation.name == "pypy":
 
     class _ConcatenateForm:
         def __getitem__(self, args):
-            return args
+            return list(args)
 
     Concatenate = _ConcatenateForm()
 
@@ -172,6 +186,7 @@ class _CodeDispatcher(Generic[T, P, R]):
     """Interface definition for the thing returned by :func:`code_dispatch`."""
 
     if TYPE_CHECKING:
+
         @overload
         def register(
             self,

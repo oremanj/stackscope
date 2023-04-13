@@ -26,7 +26,16 @@ from typing import (
 from ._types import Context
 
 
-__all__ = ["FrameDetails", "ExitingContext", "inspect_frame", "currently_exiting_context", "describe_assignment_target", "analyze_with_blocks", "contexts_active_in_frame", "set_trickery_enabled"]
+__all__ = [
+    "FrameDetails",
+    "ExitingContext",
+    "inspect_frame",
+    "currently_exiting_context",
+    "describe_assignment_target",
+    "analyze_with_blocks",
+    "contexts_active_in_frame",
+    "set_trickery_enabled",
+]
 
 
 class InspectionWarning(RuntimeWarning):
@@ -49,6 +58,7 @@ class FrameDetails:
         code object. On earlier CPython and all PyPy, they are
         directly tracked at runtime by the frame object.
         """
+
         handler: int
         level: int
 
@@ -85,11 +95,13 @@ class ExitingContext:
     """Information about the sync or async context manager that's
     currently being exited in a frame.
     """
+
     is_async: bool
     cleanup_offset: int
 
 
 if sys.version_info >= (3, 11):
+
     def _parse_varint(it: Iterator[int]) -> int:
         b = next(it)
         val = b & 63
@@ -99,10 +111,9 @@ if sys.version_info >= (3, 11):
             val |= b & 63
         return val
 
-
-    def _parse_exception_table(code: types.CodeType) -> Iterator[
-        Tuple[int, int, int, int, bool]
-    ]:
+    def _parse_exception_table(
+        code: types.CodeType,
+    ) -> Iterator[Tuple[int, int, int, int, bool]]:
         it = iter(code.co_exceptiontable)
         try:
             while True:
@@ -329,7 +340,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
             # If LOAD_CONST had an EXTENDED_ARG then skip over those.
             # This is very unlikely -- would require none of the first
             # 256 constants used in a function to be None.
-            arg |= (code[offs + 1] << shift)
+            arg |= code[offs + 1] << shift
             shift += 8
             offs -= 2
         return frame.f_code.co_consts[arg] is None
@@ -427,8 +438,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
         # Neither of these are covered by the exception handler block.
         for _, end, target, *_ in _parse_exception_table(frame.f_code):
             if end == offs or (
-                end == offs - 2
-                and code[offs] in (op["SWAP"], op["NOP"])
+                end == offs - 2 and code[offs] in (op["SWAP"], op["NOP"])
             ):
                 return ExitingContext(is_async=is_async, cleanup_offset=target)
         warnings.warn(
@@ -506,7 +516,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
                 op["SETUP_WITH"],
                 op["SETUP_ASYNC_WITH"],
             ):
-               stack.append(offs + 2 + arg * jmul)
+                stack.append(offs + 2 + arg * jmul)
         if code[offs] == op["POP_BLOCK"]:
             if offs == pop_block_offs:
                 # We found the one we're looking for!
@@ -533,7 +543,8 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
 
 
 def describe_assignment_target(
-    insns: List[dis.Instruction], start_idx: int,
+    insns: List[dis.Instruction],
+    start_idx: int,
 ) -> Optional[str]:
     """Given that ``insns[start_idx]`` and beyond constitute a series of
     instructions that assign the top-of-stack value somewhere, this
@@ -757,9 +768,10 @@ def analyze_with_blocks(code: types.CodeType) -> Dict[int, Context]:
                 start_line=current_line,
             )
         elif sys.version_info >= (3, 11) and insn.opname in (
-            "BEFORE_WITH", "BEFORE_ASYNC_WITH"
+            "BEFORE_WITH",
+            "BEFORE_ASYNC_WITH",
         ):
-            is_async = (insn.opname == "BEFORE_ASYNC_WITH")
+            is_async = insn.opname == "BEFORE_ASYNC_WITH"
             # 7: BEFORE_ASYNC_WITH, GET_AWAITABLE 1, LOAD_CONST None, SEND 3,
             #    YIELD_VALUE, RESUME 3, JUMP_BACKWARD_NO_INTERRUPT 4
             skip_insns = 7 if is_async else 1
@@ -778,7 +790,9 @@ def analyze_with_blocks(code: types.CodeType) -> Dict[int, Context]:
 
 
 def contexts_active_in_frame(
-    frame: types.FrameType, origin: Any = None, next_inner: Optional[types.FrameType] = None
+    frame: types.FrameType,
+    origin: Any = None,
+    next_inner: Optional[types.FrameType] = None,
 ) -> List[Context]:
     """Inspects the given *frame* to try to determine which context
     managers are currently active; returns a list of
@@ -897,9 +911,7 @@ def _contexts_active_by_trickery(frame: types.FrameType) -> List[Context]:
         for block in with_blocks
     ]
     if exiting is not None:
-        ret.append(
-            replace(with_block_info[exiting.cleanup_offset], is_exiting=True)
-        )
+        ret.append(replace(with_block_info[exiting.cleanup_offset], is_exiting=True))
     locals_by_id = {}
     for name, value in frame.f_locals.items():
         locals_by_id[id(value)] = name

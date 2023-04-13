@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Set
 
+
 # Copied from Trio with modifications:
 def fixup_module_metadata(module_name: str, namespace: Mapping[str, Any]) -> None:
     seen_ids: Set[int] = set()
