@@ -1,0 +1,19 @@
+[paths]
+source =
+  ../stackscope
+  */site-packages/stackscope
+
+[run]
+branch = true
+source = stackscope
+
+[report]
+precision = 1
+exclude_lines =
+  pragma: no cover
+  abstractmethod
+  if TYPE_CHECKING:
+  @overload
+partial_branches =
+  pragma: no branch
+  if not TYPE_CHECKING:
