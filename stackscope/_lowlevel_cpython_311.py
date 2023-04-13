@@ -269,7 +269,9 @@ def inspect_frame(frame: FrameType) -> FrameDetails:
             break
         start, end, target, depth, *_ = handlers[idx - 1]
         if start <= current <= end:
-            details.blocks.append(FrameDetails.FinallyBlock(handler=target, level=depth))
+            details.blocks.append(
+                FrameDetails.FinallyBlock(handler=target, level=depth)
+            )
             current = target
         else:
             break

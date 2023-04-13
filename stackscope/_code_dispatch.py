@@ -38,7 +38,7 @@ if not TYPE_CHECKING and sys.implementation.name == "pypy":
         def __getitem__(self, args):
             return list(args)
 
-    Concatenate = _ConcatenateForm()
+    Concatenate = _ConcatenateForm()  # noqa: F811
 
 
 __all__ = ["IdentityDict", "get_code", "code_dispatch"]

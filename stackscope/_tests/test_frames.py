@@ -228,14 +228,17 @@ def test_unexpected_aexit_sequence():
         if (
             idx % 2 == 0
             and ibyte in (op.get("YIELD_FROM"), op.get("SEND"))
-            and co.co_code[idx - 6] in (  # distinguish __aenter__ from __aexit__
-                op.get("CACHE"), op.get("CALL_FUNCTION"), op.get("WITH_CLEANUP_START")
+            and co.co_code[idx - 6]
+            in (  # distinguish __aenter__ from __aexit__
+                op.get("CACHE"),
+                op.get("CALL_FUNCTION"),
+                op.get("WITH_CLEANUP_START"),
             )
         ):
             example.__code__ = co.replace(
-                co_code=co.co_code[:idx] + bytes(
-                    [op["LOAD_CONST"], 0, op["POP_TOP"], 0]
-                ) + co.co_code[idx:],
+                co_code=co.co_code[:idx]
+                + bytes([op["LOAD_CONST"], 0, op["POP_TOP"], 0])
+                + co.co_code[idx:],
             )
             break
     else:
@@ -245,10 +248,13 @@ def test_unexpected_aexit_sequence():
     assert 42 == coro.send(None)
     with pytest.warns(stackscope.InspectionWarning, match="LOAD_CONST"):
         ssll.contexts_active_in_frame(coro.cr_frame)
-    # we must step the coroutine normally; coro.close() will crash on 3.12
-    # since we didn't adjust the exception table
-    with pytest.raises(StopIteration):
-        coro.send(None)
+    if sys.version_info < (3, 12):
+        coro.close()
+    else:
+        # we must step the coroutine normally; coro.close() will crash on 3.12
+        # since we didn't adjust the exception table
+        with pytest.raises(StopIteration):
+            coro.send(None)
 
     if sys.version_info >= (3, 11):
         # LOAD_CONST something other than None

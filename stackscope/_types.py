@@ -106,7 +106,6 @@ class Stack(Formattable):
         start_frame = "+ " if opts.ascii_only else "╠ "
         continue_frame = "| " if opts.ascii_only else "║ "
         start_leaf = "+ " if opts.ascii_only else "╚ "
-        start_error = continue_error = "  "
 
         lines = ["stackscope.Stack (most recent call last):\n"]
         for frame in self.frames:
