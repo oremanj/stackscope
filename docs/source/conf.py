@@ -22,6 +22,20 @@ import sys
 # So autodoc can import our package
 sys.path.insert(0, os.path.abspath('../..'))
 
+# https://docs.readthedocs.io/en/stable/builds.html#build-environment
+if "READTHEDOCS" in os.environ:
+    import glob
+
+    if glob.glob("../../newsfragments/*.*.rst"):
+        print("-- Found newsfragments; running towncrier --", flush=True)
+        import subprocess
+
+        subprocess.run(
+            ["towncrier", "--yes", "--date", "not released yet"],
+            cwd="../..",
+            check=True,
+        )
+
 # Warn about all references to unknown targets
 nitpicky = True
 # Except for these ones, which we expect to point to unknown targets:
@@ -31,6 +45,7 @@ nitpick_ignore = [
     ("py:class", "types.CodeType"),
     ("py:class", "types.FrameType"),
     ("py:class", "stackscope._customization.P"),
+    ("py:class", "P"),
     ("py:class", "stackscope._customization.T"),
     ("py:class", "stackscope._code_dispatch.T"),
     ("py:class", "stackscope._code_dispatch.P"),

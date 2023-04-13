@@ -2,3 +2,5 @@ sphinx
 sphinx_rtd_theme
 sphinxcontrib-trio
 towncrier
+exceptiongroup; python_version < "3.11"
+typing_extensions
