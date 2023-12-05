@@ -8,8 +8,8 @@ adapted to provide good stack traces for context managers, awaitables,
 and control-flow primitives that it doesn't natively know anything about.
 These are implemented either as `@functools.singledispatch <functools.singledispatch>`
 functions (which dispatch to a different implementation depending on the type of
-their first argument), or in one case as a `@stackscope.lowlevel.code_dispatch
-<stackscope.lowlevel.code_dispatch>` function (which dispatches to a different
+their first argument) or as `@stackscope.lowlevel.code_dispatch
+<stackscope.lowlevel.code_dispatch>` functions (which dispatch to a different
 implementation depending on the identity of the Python code object associated
 with their first argument). Implementations of these hooks that support a
 particular library are referred to as stackscope "glue" for that library.
@@ -70,11 +70,14 @@ dispatched based on the *code object identity* of the executing frame,
 so it's useful for customizations that are specific to a particular
 function. (You get approximately one code object per source file
 location of a function definition.) It receives the frame it is
-elaborating as well as the next inner frame-or-leaf for context. It can
-customize the `Frame` object, such as by setting the `Frame.hide`
-attribute. It can also redirect the rest of the stack extraction, by
-returning a stack item that will be used in place of the
-otherwise-next frame and all of its callees.
+elaborating as well as the next inner frame-or-leaf for context. It
+can customize the `Frame` object, such as by setting the `Frame.hide`
+attribute or modifying the `Frame.contexts`. It can also redirect the
+rest of the stack extraction, by returning a stack item or sequence of
+stack items that will be used in place of the otherwise-next frame and
+all of its callees. (If it returns a sequence that ends with the
+otherwise-next frame, then the preceding elements are inserted before
+the rest of the stack trace rather than replacing it.)
 
 Example: glue for elaborating :func:`greenback.await_`::
 
@@ -104,8 +107,9 @@ Example: glue for elaborating :func:`greenback.await_`::
 Contexts
 ~~~~~~~~
 
-There are two hooks relevant in determining the context
-managers in the returned stack: :func:`unwrap_context` and
+There are three hooks relevant in determining the context
+managers in the returned stack: :func:`unwrap_context`,
+:func:`unwrap_context_generator`, and
 :func:`elaborate_context`. They are less complex than the frame hooks
 since they only operate on one context manager at a time.
 
@@ -124,6 +128,18 @@ Example: glue for elaborating `greenback.async_context` objects::
     @unwrap_context.register(greenback.async_context)
     def unwrap_greenback_async_context(manager: Any) -> Any:
         return manager._cm
+
+:func:`unwrap_context_generator` is a specialization of
+:func:`unwrap_context` for generator-based context managers
+(`@contextmanager <contextlib.contextmanager>` and
+`@asynccontextmanager <contextlib.asynccontextmanager>`).  It works
+exactly like :func:`unwrap_context` except that it takes as its first
+argument the generator's `Stack` rather than the context manager
+object. Like :func:`elaborate_frame`, :func:`unwrap_context_generator`
+is dispatched based on the code object identity of the function that
+implements the context manager, so you can unwrap different generator-based
+context managers in different ways even though their context manager
+objects all have the same type.
 
 :func:`elaborate_context` is called once for each context manager
 before trying to unwrap it, and again after each successful

@@ -17,7 +17,7 @@ setup(
     install_requires=["exceptiongroup >= 1.0.0; python_version < '3.11'"],
     include_package_data=True,
     keywords=["async", "debugging", "trio", "asyncio"],
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     classifiers=[
         "License :: OSI Approved :: MIT License",
         "License :: OSI Approved :: Apache Software License",

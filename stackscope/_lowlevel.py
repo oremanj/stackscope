@@ -71,7 +71,7 @@ def inspect_frame(frame: types.FrameType) -> FrameDetails:
     and evaluation stack for the currently executing or suspended
     frame *frame*.
 
-    There are three implementations of this function: one for CPython 3.7-3.10,
+    There are three implementations of this function: one for CPython 3.8-3.10,
     one for CPython 3.11+, and one for PyPy when using the "incminimark" garbage
     collector. The appropriate one will be chosen automatically.
     """
@@ -374,13 +374,7 @@ def currently_exiting_context(frame: types.FrameType) -> Optional[ExitingContext
         # the same as in the synchronous case
         offs -= 2
 
-    if sys.version_info < (3, 8):
-        # 3.7 and below: every exit call is done from a single WITH_CLEANUP_START
-        # location per 'with' block
-        if code[offs] == op["WITH_CLEANUP_START"]:
-            return ExitingContext(is_async=is_async, cleanup_offset=offs)
-        return None
-    elif sys.version_info < (3, 9):
+    if sys.version_info < (3, 9):
         # 3.8: they all use WITH_CLEANUP_START, but there might be multiple instances;
         # backtrack to the preceding POP_BLOCK
         if offs < 4 or code[offs] != op["WITH_CLEANUP_START"]:

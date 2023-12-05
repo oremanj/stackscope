@@ -1,0 +1,15 @@
+Added glue to support ``pytest-trio``.
+
+Added `Frame.hide_line` and `Context.hide` attributes for more precise
+control of output.
+
+Added :func:`unwrap_context_generator` hook for more specific customization
+of generator-based context managers.
+
+Modified the :func:`elaborate_frame` hook to be able to return a sequence
+of stack items rather than just a single one. This permits more expressive
+augmentation rules, such as inserting elements into the stack trace without
+removing what would've been there if the hook were not present.
+
+:func:`elaborate_frame` now runs after `Frame.contexts` is populated,
+so it has the chance to modify the detected context managers.
