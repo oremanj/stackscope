@@ -24,7 +24,7 @@ from typing import (
 from typing_extensions import ParamSpec
 
 from ._code_dispatch import code_dispatch
-from ._types import Frame, Context, StackItem
+from ._types import Stack, Frame, Context, StackItem
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -34,6 +34,7 @@ __all__ = [
     "unwrap_stackitem",
     "elaborate_frame",
     "unwrap_context",
+    "unwrap_context_generator",
     "elaborate_context",
     "customize",
     "fill_context",
@@ -42,12 +43,7 @@ __all__ = [
 ]
 
 
-class _Prune:
-    def __repr__(self) -> str:
-        return "stackscope.customization.PRUNE"
-
-
-PRUNE = _Prune()
+PRUNE = ()
 
 
 @dataclasses.dataclass
@@ -121,7 +117,9 @@ def _code_of_frame(frame: Frame) -> types.CodeType:
 
 
 @code_dispatch(_code_of_frame)
-def elaborate_frame(frame: Frame, next_inner: object) -> Union[StackItem, _Prune, None]:
+def elaborate_frame(
+    frame: Frame, next_inner: object
+) -> Union[StackItem, Sequence[StackItem], None]:
     """Hook for providing additional information about a frame encountered
     during stack traversal. This hook uses `@code_dispatch
     <stackscope.lowlevel.code_dispatch>`, so it can be customized
@@ -133,11 +131,14 @@ def elaborate_frame(frame: Frame, next_inner: object) -> Union[StackItem, _Prune
 
     The :func:`elaborate_frame` hook may modify the attributes of *frame*,
     such as by setting `Frame.hide`. It may also redirect the remainder of
-    the stack trace, by returning an object that should be unwrapped to
-    become the new *next_inner*. If you don't want to replace the rest of
-    the stack trace, then return None. If you want to remove the rest of
-    the stack trace and not replace it with anything, then return `PRUNE`.
-
+    the stack trace, by returning an object or sequence of objects that
+    should be unwrapped to become the new *next_inner*. If the return value
+    is a sequence and it ends with *next_inner*, then the items before
+    *next_inner* are inserted before the remainder of the stack trace
+    instead of replacing it. If you don't want to affect the rest of the
+    stack trace, then return None (equivalent to *next_inner*). If you want to
+    remove the rest of the stack trace and not replace it with anything,
+    then return `PRUNE` (which is equivalent to an empty tuple).
     """
     if "__tracebackhide__" in frame.pyframe.f_locals:
         frame.hide = True
@@ -146,11 +147,42 @@ def elaborate_frame(frame: Frame, next_inner: object) -> Union[StackItem, _Prune
 
 @functools.singledispatch
 def unwrap_context(
-    manager: Union[ContextManager[Any], AsyncContextManager[Any]]
-) -> Optional[Union[ContextManager[Any], AsyncContextManager[Any]]]:
+    manager: ContextManager[Any] | AsyncContextManager[Any],
+) -> None | ContextManager[Any] | AsyncContextManager[Any] | tuple[()]:
     """Hook for extracting an inner context manager from another
     context manager that wraps it. Return None if there is no further
-    unwrapping to do.
+    unwrapping to do. Return `PRUNE` (equivalent to an empty tuple)
+    to hide this context manager from the traceback. Unlike
+    :func:`unwrap_stackitem`, it is not currently supported to let the
+    result of unwrapping a context manager be a sequence of multiple
+    context managers.
+
+    .. note:: If the original context manager is currently exiting, the
+       frames implementing its ``__exit__`` will appear on the stack
+       regardless of any unwrapping you do here. You can customize
+       :func:`elaborate_frame` for the appropriate ``__exit__`` if you
+       want to affect the display there as well.
+    """
+    return None
+
+
+def _code_of_first_frame(stack: Stack) -> types.CodeType:
+    if not stack.frames:
+        # arbitrary code object that no one will register
+        return _code_of_first_frame.__code__
+    return stack.frames[0].pyframe.f_code
+
+
+@code_dispatch(_code_of_first_frame)
+def unwrap_context_generator(
+    inner_stack: Stack,
+) -> None | ContextManager[Any] | AsyncContextManager[Any] | tuple[()]:
+    """Hook for extracting an inner context manager from the
+    *inner_stack* of a generator-based context manager that wraps it.
+    This hook uses `@code_dispatch <stackscope.lowlevel.code_dispatch>`,
+    so it can be customized based on the identity of the function that
+    implements the context manager (the outermost frame in *inner_stack*).
+    Apart from that, its semantics are equivalent to :func:`unwrap_context`.
     """
     return None
 
@@ -182,6 +214,9 @@ def fill_context(context: Context) -> None:
         inner_mgr = unwrap_context(context.obj)
         if inner_mgr is None:
             break
+        if inner_mgr == PRUNE:
+            context.hide = True
+            break
         context.obj = inner_mgr
     else:
         inner_mgr = unwrap_context(context.obj)  # type: ignore
@@ -196,6 +231,7 @@ def fill_context(context: Context) -> None:
 def customize(
     *,
     hide: bool = False,
+    hide_line: bool = False,
     prune: bool = False,
     elaborate: Optional[Callable[[Frame, object], object]] = None,
 ) -> Callable[[T], T]:
@@ -207,6 +243,7 @@ def customize(
     __target: T,
     *inner_names: str,
     hide: bool = False,
+    hide_line: bool = False,
     prune: bool = False,
     elaborate: Optional[Callable[[Frame, object], object]] = None,
 ) -> T:
@@ -217,6 +254,7 @@ def customize(
     target: Any = None,
     *inner_names: str,
     hide: bool = False,
+    hide_line: bool = False,
     prune: bool = False,
     elaborate: Optional[Callable[[Frame, object], object]] = None,
 ) -> Any:
@@ -248,6 +286,11 @@ def customize(
     * If *hide* is True, then the matching frames will have their
       `Frame.hide` attribute set to True, indicating that they should
       not be shown by default when printing the stack.
+
+    * If *hide_line* is True, then the matching frames will have their
+      `Frame.hide_line` attribute set to True, indicating that the executing
+      line should not be shown by default when printing the stack (but the
+      function info and contexts still will be).
 
     * If *prune* is True, then direct and indirect callees of
       the matching frames will not be included when extracting the

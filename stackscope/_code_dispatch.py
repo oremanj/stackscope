@@ -12,6 +12,7 @@ from typing import (
     Generic,
     Iterable,
     Iterator,
+    Mapping,
     MutableMapping,
     Tuple,
     TypeVar,
@@ -186,6 +187,7 @@ class _CodeDispatcher(Generic[T, P, R]):
     """Interface definition for the thing returned by :func:`code_dispatch`."""
 
     if TYPE_CHECKING:
+        registry: Mapping[types.CodeType, Callable[Concatenate[T, P], R]]
 
         @overload
         def register(

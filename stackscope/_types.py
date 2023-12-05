@@ -201,6 +201,7 @@ class Frame(Formattable):
     origin: Optional[StackItem] = None
     contexts: Sequence[Context] = ()
     hide: bool = False
+    hide_line: bool = False
 
     def __post_init__(self) -> None:
         if self.lineno == -1:
@@ -263,7 +264,7 @@ class Frame(Formattable):
         describes. The result has leading and trailing whitespace
         stripped, and does not end in a newline.
         """
-        if self.lineno == 0:
+        if self.lineno == 0 or self.hide_line:
             return ""
         return linecache.getline(
             self.filename, self.lineno, self.pyframe.f_globals
@@ -400,6 +401,7 @@ class Context(Formattable):
     description: Optional[str] = None
     inner_stack: Optional[Stack] = None
     children: Sequence[Context] = ()
+    hide: bool = False
 
     def _name_and_type(self) -> str:
         if self.obj is not None:
@@ -418,6 +420,8 @@ class Context(Formattable):
         capture_locals: bool,
         override_line: Optional[str] = None,
     ) -> Iterator[traceback.FrameSummary]:
+        if self.hide and not show_hidden_frames:
+            return
         if capture_locals:
             save_locals = {"<context manager>": self.description or repr(self.obj)}
         else:
@@ -451,6 +455,9 @@ class Context(Formattable):
         *,
         show_lineno: bool = True,
     ) -> List[str]:
+        if self.hide and not opts.show_hidden_frames:
+            return []
+
         start_child = ". " if opts.ascii_only else "─ "
         continue_child = "  "
 
