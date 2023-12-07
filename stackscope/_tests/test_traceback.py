@@ -636,6 +636,9 @@ def test_running_in_thread():
                 "threading.py"
             ):  # pragma: no cover
                 stack.frames = stack.frames[:-1]
+            assert stack.frames, (
+                cooked, thread, thread.ident, sys._current_frames(),
+            )
 
             assert_stack_matches(
                 stack,
