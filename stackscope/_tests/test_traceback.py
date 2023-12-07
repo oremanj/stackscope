@@ -7,7 +7,7 @@ import types
 import dataclasses
 from contextlib import ExitStack, AsyncExitStack, contextmanager
 from functools import partial
-from typing import List, Callable, Any, cast
+from typing import List, Callable, Any, AsyncIterator, cast
 
 import pytest
 
@@ -371,6 +371,10 @@ def test_suspended():
     assert_stack_matches(extract(coro), [])
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 12),
+    reason="https://github.com/python-greenlet/greenlet/issues/388",
+)
 def test_greenlet():
     greenlet = pytest.importorskip("greenlet")
 
@@ -623,15 +627,16 @@ def test_running_in_thread():
             # Exactly where we are inside Event.wait() is indeterminate, so
             # strip frames until we find Event.wait() and then remove it
 
-            while (
+            while stack.frames and (
                 not stack.frames[-1].filename.endswith("threading.py")
                 or stack.frames[-1].funcname != "wait"
             ):  # pragma: no cover
                 stack.frames = stack.frames[:-1]
-            while stack.frames[-1].filename.endswith(
+            while stack.frames and stack.frames[-1].filename.endswith(
                 "threading.py"
             ):  # pragma: no cover
                 stack.frames = stack.frames[:-1]
+            assert stack.frames, (cooked, thread, thread.ident, sys._current_frames())
 
             assert_stack_matches(
                 stack,
@@ -685,7 +690,7 @@ def test_trace_into_thread(local_registry):
 
     @elaborate_frame.register(run_sync_in_thread)
     def get_target(frame, next_inner):
-        return frame.pyframe.f_locals["thread"]
+        return (frame.pyframe.f_locals["thread"], next_inner)
 
     customize(run_sync_in_thread, "run_it", hide=True)
 
@@ -990,6 +995,133 @@ def test_trio_nursery():
     )
 
 
+def test_pytest_trio_glue() -> None:
+    plugin = pytest.importorskip("pytest_trio.plugin")
+    import contextvars
+    import trio
+    import trio.testing
+
+    tasks: list[trio.lowlevel.Task] = []
+    stacks: dict[str, Stack] = {}
+
+    def nursery() -> Any:
+        return plugin.NURSERY_FIXTURE_PLACEHOLDER
+
+    async def completed(nursery: trio.Nursery) -> int:
+        nursery.start_soon(trio.sleep_forever)
+        await trio.sleep(0)
+        return 42
+
+    async def generator(completed: int) -> AsyncIterator[trio.Nursery]:
+        assert completed == 42
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(trio.sleep_forever)
+            yield nursery
+            nursery.cancel_scope.cancel()
+
+    continue_evt = trio.Event()
+
+    async def in_progress() -> AsyncIterator[int]:
+        await continue_evt.wait()
+        yield 50
+
+    async def examine(generator: trio.Nursery) -> int:
+        await trio.testing.wait_all_tasks_blocked()
+        for task in tasks:
+            stacks[task.name] = extract(task.coro)
+        continue_evt.set()
+        return 100
+
+    async def late(examine: int, in_progress: int) -> int:
+        assert examine == 100 and in_progress == 50
+        return 200
+
+    async def test(generator: trio.Nursery, late: int) -> None:
+        assert late == 200
+        assert stacks["generator"].frames[-1].pyframe.f_locals["nursery"] is generator
+
+    test_ctx = plugin.TrioTestContext()
+    nursery_fix = plugin.TrioFixture("nursery", nursery, {})
+    completed_fix = plugin.TrioFixture("completed", completed, {"nursery": nursery_fix})
+    generator_fix = plugin.TrioFixture(
+        "generator", generator, {"completed": completed_fix}
+    )
+    in_progress_fix = plugin.TrioFixture("in_progress", in_progress, {})
+    examine_fix = plugin.TrioFixture("examine", examine, {"generator": generator_fix})
+    late_fix = plugin.TrioFixture(
+        "late", late, {"examine": examine_fix, "in_progress": in_progress_fix}
+    )
+    test_fix = plugin.TrioFixture(
+        "test", test, {"generator": generator_fix, "late": late_fix}, is_test=True
+    )
+
+    async def main() -> None:
+        contextvars_ctx = contextvars.copy_context()
+        contextvars_ctx.run(plugin.canary.set, "in correct context")
+
+        async with trio.open_nursery() as outer_nursery:
+            for fixture in test_fix.register_and_collect_dependencies():
+                outer_nursery.start_soon(
+                    fixture.run, test_ctx, contextvars_ctx, name=fixture.name
+                )
+            tasks.extend(outer_nursery.child_tasks)
+
+    trio.run(main)
+
+    assert_stack_matches(
+        stacks["completed"],
+        [
+            (
+                "run",
+                "async with self._fixture_manager(test_ctx) as nursery_fixture:",
+                "nursery_fixture",
+                "Nursery",
+            ),
+            ("run", "await event.wait()", None, None),
+            ("wait", "await _core.wait_task_rescheduled(abort_fn)", None, None),
+        ],
+    )
+    assert_stack_matches(
+        stacks["generator"],
+        [
+            ("run", "await event.wait()", None, None),
+            (
+                "generator",
+                "async with trio.open_nursery() as nursery:",
+                "nursery",
+                "Nursery",
+            ),
+            ("generator", "yield nursery", None, None),
+        ],
+    )
+    assert_stack_matches(
+        stacks["examine"],
+        [
+            ("run", "self.fixture_value = await func_value", None, None),
+            ("examine", "stacks[task.name] = extract(task.coro)", None, None),
+        ],
+    )
+    assert_stack_matches(
+        stacks["in_progress"],
+        [
+            ("run", "self.fixture_value = await func_value.asend(None)", None, None),
+            ("in_progress", "await continue_evt.wait()", None, None),
+            ("wait", "await _core.wait_task_rescheduled(abort_fn)", None, None),
+        ],
+    )
+    assert_stack_matches(
+        stacks["late"],
+        [
+            ("run", "await value.setup_done.wait()", None, None),
+            ("wait", "await _core.wait_task_rescheduled(abort_fn)", None, None),
+        ],
+    )
+
+
+@pytest.mark.skipif(
+    sys.version_info >= (3, 12),
+    reason="https://github.com/python-greenlet/greenlet/issues/388",
+)
 def test_greenback() -> None:
     trio = pytest.importorskip("trio")
     greenback = pytest.importorskip("greenback")

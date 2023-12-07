@@ -137,6 +137,17 @@ organize the data returned by :func:`extract`.
       If true, this frame relates to library internals that are likely
       to be more distracting than they are useful to see in a traceback.
       Analogous to the ``__tracebackhide__`` variable supported by pytest.
+      Hidden frames are suppressed by default when printing stacks, but
+      this can be controlled using the *show_hidden_frames* argument
+      to :meth:`format`.
+
+   .. autoattribute:: hide_line
+
+      Limited version of `hide` which by default suppresses display of the
+      executing line, but not of the function information or context managers
+      associated with the frame. As with `hide`, you can force the hidden
+      information to be displayed by specifying the *show_hidden_frames*
+      argument to :meth:`format`.
 
    .. autoproperty:: filename
    .. autoproperty:: funcname
@@ -206,5 +217,14 @@ organize the data returned by :func:`extract`.
       The other context managers nested inside this one, if applicable.
       For example, an `~contextlib.ExitStack` will have one entry here
       per thing that was pushed on the stack.
+
+   .. autoattribute:: hide
+
+      If true, this context manager relates to library internals that are likely
+      to be more distracting than they are useful to see in a traceback.
+      Analogous to the ``__tracebackhide__`` variable supported by pytest.
+      Hidden context managers are suppressed by default when printing stacks,
+      but this can be controlled using the *show_hidden_frames* argument
+      to :meth:`format`.
 
    .. automethod:: format

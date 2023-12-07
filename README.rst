@@ -39,7 +39,7 @@ be made to cover the code that's running in the thread as well.)
 obsessive focus on usability and correctness. The context manager
 analysis is especially helpful with Trio since you can use it to
 understand where the nurseries are. You don't have to use ``stackscope``
-with Trio, though; it requires only the Python standard library, 3.7
+with Trio, though; it requires only the Python standard library, 3.8
 or later, and the `ExceptionGroup backport <https://pypi.org/project/exceptiongroup/>`__
 on versions below 3.11.
 
@@ -54,9 +54,9 @@ tracebacks for their code.  ``stackscope`` ships out of the box with such
 <https://greenback.readthedocs.io/en/latest/>`__, and some of their
 lower-level dependencies.
 
-``stackscope`` requires Python 3.7 or later. It is fully
+``stackscope`` requires Python 3.8 or later. It is fully
 type-annotated and is tested with CPython (every minor version through
-3.12-dev) and PyPy, on Linux, Windows, and macOS. It will probably
+3.12) and PyPy, on Linux, Windows, and macOS. It will probably
 work on other operating systems.  Basic features will work on other
 Python implementations, but the context manager decoding will be less
 intelligent, and won't work at all without a usable

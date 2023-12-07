@@ -174,8 +174,9 @@ def inspect_frame(frame: FrameType) -> FrameDetails:
     def build_full_stack(refs: Sequence[object]) -> List[object]:
         assert isinstance(valuestack_ref, pgc.GcRef)
         stackdata_p = unwrap_gcref(valuestack_ref)
-        assert _pypy_typename_from_first_word(stackdata_p[0]) == (
-            "GcArray of * GcStruct object"
+        assert _pypy_typename_from_first_word(stackdata_p[0]) in (
+            "GcArray of * GcStruct object",
+            "GcArray of * GCREF (gcopaque) ",
         )
         ref_iter = iter(refs)
         result: List[object] = []

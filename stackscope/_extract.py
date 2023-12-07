@@ -153,16 +153,10 @@ def extract_iter(
                 return list(to_elaborate)
             return to_elaborate[0]
 
-        # Elaborate the first of these frames using the next thing as context
+        # Grab the first frame, and fill in context managers if requested
         frame = to_elaborate.popleft()
         assert isinstance(frame, Frame)
         next_inner = to_elaborate[0] if to_elaborate else None
-        try:
-            replacement = elaborate_frame(frame, next_inner)
-        except Exception as ex:
-            save_errors.append(ex)
-            frame.hide = False
-            replacement = PRUNE
 
         if with_contexts:
             next_pyframe = next_inner.pyframe if isinstance(next_inner, Frame) else None
@@ -179,15 +173,36 @@ def extract_iter(
                     except Exception as ex:
                         save_errors.append(ex)
 
+        # Elaborate the frame, see if we should redirect our attention
+        # elsewhere
+        try:
+            replacement = elaborate_frame(frame, next_inner)
+        except Exception as ex:
+            save_errors.append(ex)
+            frame.hide = False
+            replacement = PRUNE
+
         yield frame
         if replacement is None:
             continue
-        elif replacement is PRUNE:
-            return None
+        if isinstance(replacement, collections.abc.Sequence):
+            items = replacement
         else:
+            items = (replacement,)
+        if items and items[-1] is next_inner:
+            # Inserting before the rest of the stack trace
+            while to_elaborate:
+                # Any origin info has already been stored on the Frame,
+                # so we don't need to track it separately (that's the None)
+                to_unwrap.appendleft((None, to_elaborate.pop()))
+            for item in reversed(items[:-1]):
+                to_unwrap.appendleft((better_origin(item, None), item))
+        else:
+            # Replacing the rest of the stack trace
             to_elaborate.clear()
             to_unwrap.clear()
-            to_unwrap.append((better_origin(replacement, None), replacement))
+            for item in items:
+                to_unwrap.append((better_origin(item, None), item))
 
     return None
 

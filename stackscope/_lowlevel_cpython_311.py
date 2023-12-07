@@ -51,7 +51,7 @@ class InterpreterFrame(ctypes.Structure):
             ("is_entry", ctypes.c_byte),
             ("owner", ctypes.c_byte),
         ]
-    if (3, 12) <= sys.version_info < (3, 12, 0, "alpha", 6):
+    if (3, 12) <= sys.version_info < (3, 12, 0, "alpha", 6):  # pragma: no cover
         # Fields were reordered in 3.12.0a6; handle previous alpha releases
         # temporarily
         f_code = _fields_.pop(0)

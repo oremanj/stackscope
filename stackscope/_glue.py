@@ -12,6 +12,7 @@ import types
 import warnings
 from typing import (
     Any,
+    AsyncContextManager,
     AsyncGenerator,
     Callable,
     Coroutine,
@@ -27,13 +28,14 @@ from typing import (
     cast,
 )
 
-from ._types import Frame, Context, StackSlice
+from ._types import Stack, Frame, Context, StackSlice
 from ._code_dispatch import get_code
 from ._customization import (
     unwrap_stackitem,
     elaborate_frame,
     customize,
     unwrap_context,
+    unwrap_context_generator,
     elaborate_context,
     fill_context,
     yields_frames,
@@ -62,10 +64,10 @@ builtin_glue_pending: Dict[str, InstallGlueFn] = {}
 
 def builtin_glue(needs_module: str) -> Callable[[InstallGlueFn], InstallGlueFn]:
     def decorate(fn: InstallGlueFn) -> InstallGlueFn:
+        assert needs_module not in builtin_glue_pending
         if needs_module in sys.modules and "sphinx" not in sys.modules:
             fn()
         else:
-            assert needs_module not in builtin_glue_pending
             builtin_glue_pending[needs_module] = fn
         return fn
 
@@ -348,6 +350,19 @@ def glue_contextlib() -> None:
             # 3.7+ delete the func/args/etc attrs once entered
             context.description = f"{mgr.gen.__qualname__}(...)"
 
+    @unwrap_context.register(GCMBase)
+    def unwrap_generatorbased_contextmanager(mgr: Any) -> Any:
+        mgr_code: types.CodeType
+        if hasattr(mgr.gen, "gi_code"):
+            mgr_code = mgr.gen.gi_code
+        elif hasattr(mgr.gen, "ag_code"):
+            mgr_code = mgr.gen.ag_code
+        else:  # pragma: no cover
+            return None
+        if mgr_code in unwrap_context_generator.registry:
+            return unwrap_context_generator(_extract.extract(mgr.gen))
+        return None
+
     @elaborate_context.register(ExitStackBase)
     def elaborate_exit_stack(stack: Any, context: Context) -> None:
         stackname = context.varname or "_"
@@ -533,6 +548,58 @@ def glue_trio() -> None:
         context.obj = manager._nursery
 
 
+@builtin_glue("pytest_trio.plugin")
+def glue_pytest_trio() -> None:
+    import pytest_trio.plugin  # type: ignore
+    import trio
+
+    @elaborate_frame.register(pytest_trio.plugin.TrioFixture.run)
+    def elaborate_fixture(frame: Frame, next_inner: object) -> object:
+        # When a pytest-trio fixture is implemented using an async generator,
+        # any nurseries the fixture left open will be on the async generator's
+        # stack, which is not directly on the fixture task's stack. Detect
+        # this situation and fix it up.
+        if not isinstance(next_inner, Frame):  # pragma: no cover
+            return None
+        # Do we have the fixture generator yet? (Might not if we're still waiting
+        # for a depended-upon fixture to finish.)
+        gen = frame.pyframe.f_locals.get("func_value")
+        if gen is None:
+            return None
+        # Is it actually a generator? (Might not if this is a fixture that
+        # does some async setup and just returns.)
+        if not (hasattr(gen, "asend") or hasattr(gen, "__next__")):
+            return None
+        # Are we waiting for the test to finish? (Might not if we're still
+        # running the setup phase of the fixture.)
+        if next_inner.clsname == "Event" and next_inner.funcname == "wait":
+            # Yes -- show the fixture generator's stack in place of Event.wait().
+            frame.hide_line = True
+            return gen
+        return None
+
+    @unwrap_context_generator.register(pytest_trio.plugin.TrioFixture._fixture_manager)
+    def unwrap_fixture_manager(
+        stack: Stack,
+    ) -> None | AsyncContextManager[Any] | tuple[()]:
+        # Replace the internal _fixture_manager context (which is itself
+        # uninteresting) with the nursery that it contains (which might
+        # be hosting relevant portions of the test logic that we don't
+        # wish to hide). If that nursery has nothing in it, then hide it.
+        if stack.frames[0].contexts and isinstance(
+            nursery := stack.frames[0].contexts[0].obj, trio.Nursery
+        ):
+            if nursery.child_tasks:
+                return cast(AsyncContextManager[Any], nursery)
+            else:
+                return ()
+        else:  # pragma: no cover
+            # There are no checkpoints in _fixture_manager() except
+            # Nursery.__aexit__, so it is not generally possible to observe
+            # it without the nursery on its context stack.
+            return None
+
+
 @builtin_glue("greenlet")
 def glue_greenlet() -> None:
     import greenlet  # type: ignore
@@ -547,7 +614,7 @@ def glue_greenlet() -> None:
             # otherwise a None frame means it's running
             if glet is not greenlet_getcurrent():
                 raise RuntimeError(
-                    "Can't dump the stack of a greenlet running " "in another thread"
+                    "Can't dump the stack of a greenlet running in another thread"
                 )
             # since it's running in this thread, its stack is our own
             inner_frame = get_true_caller()
