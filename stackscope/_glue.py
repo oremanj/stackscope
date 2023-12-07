@@ -352,14 +352,12 @@ def glue_contextlib() -> None:
 
     @unwrap_context.register(GCMBase)
     def unwrap_generatorbased_contextmanager(mgr: Any) -> Any:
-        if not hasattr(mgr, "gen"):
-            return None
         mgr_code: types.CodeType
         if hasattr(mgr.gen, "gi_code"):
             mgr_code = mgr.gen.gi_code
         elif hasattr(mgr.gen, "ag_code"):
             mgr_code = mgr.gen.ag_code
-        else:
+        else:  # pragma: no cover
             return None
         if mgr_code in unwrap_context_generator.registry:
             return unwrap_context_generator(_extract.extract(mgr.gen))
@@ -595,7 +593,11 @@ def glue_pytest_trio() -> None:
                 return cast(AsyncContextManager[Any], nursery)
             else:
                 return ()
-        return None
+        else:  # pragma: no cover
+            # There are no checkpoints in _fixture_manager() except
+            # Nursery.__aexit__, so it is not generally possible to observe
+            # it without the nursery on its context stack.
+            return None
 
 
 @builtin_glue("greenlet")

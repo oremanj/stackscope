@@ -371,6 +371,10 @@ def test_suspended():
     assert_stack_matches(extract(coro), [])
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 12),
+    reason="https://github.com/python-greenlet/greenlet/issues/388",
+)
 def test_greenlet():
     greenlet = pytest.importorskip("greenlet")
 
@@ -623,12 +627,12 @@ def test_running_in_thread():
             # Exactly where we are inside Event.wait() is indeterminate, so
             # strip frames until we find Event.wait() and then remove it
 
-            while (
+            while stack.frames and (
                 not stack.frames[-1].filename.endswith("threading.py")
                 or stack.frames[-1].funcname != "wait"
             ):  # pragma: no cover
                 stack.frames = stack.frames[:-1]
-            while stack.frames[-1].filename.endswith(
+            while stack.frames and stack.frames[-1].filename.endswith(
                 "threading.py"
             ):  # pragma: no cover
                 stack.frames = stack.frames[:-1]
@@ -685,7 +689,7 @@ def test_trace_into_thread(local_registry):
 
     @elaborate_frame.register(run_sync_in_thread)
     def get_target(frame, next_inner):
-        return frame.pyframe.f_locals["thread"]
+        return (frame.pyframe.f_locals["thread"], next_inner)
 
     customize(run_sync_in_thread, "run_it", hide=True)
 
@@ -1014,14 +1018,21 @@ def test_pytest_trio_glue() -> None:
             yield nursery
             nursery.cancel_scope.cancel()
 
+    continue_evt = trio.Event()
+
+    async def in_progress() -> AsyncIterator[int]:
+        await continue_evt.wait()
+        yield 50
+
     async def examine(generator: trio.Nursery) -> int:
         await trio.testing.wait_all_tasks_blocked()
         for task in tasks:
             stacks[task.name] = extract(task.coro)
+        continue_evt.set()
         return 100
 
-    async def late(examine: int) -> int:
-        assert examine == 100
+    async def late(examine: int, in_progress: int) -> int:
+        assert examine == 100 and in_progress == 50
         return 200
 
     async def test(generator: trio.Nursery, late: int) -> None:
@@ -1034,8 +1045,11 @@ def test_pytest_trio_glue() -> None:
     generator_fix = plugin.TrioFixture(
         "generator", generator, {"completed": completed_fix}
     )
+    in_progress_fix = plugin.TrioFixture("in_progress", in_progress, {})
     examine_fix = plugin.TrioFixture("examine", examine, {"generator": generator_fix})
-    late_fix = plugin.TrioFixture("late", late, {"examine": examine_fix})
+    late_fix = plugin.TrioFixture(
+        "late", late, {"examine": examine_fix, "in_progress": in_progress_fix}
+    )
     test_fix = plugin.TrioFixture(
         "test", test, {"generator": generator_fix, "late": late_fix}, is_test=True
     )
@@ -1087,6 +1101,14 @@ def test_pytest_trio_glue() -> None:
         ],
     )
     assert_stack_matches(
+        stacks["in_progress"],
+        [
+            ("run", "self.fixture_value = await func_value.asend(None)", None, None),
+            ("in_progress", "await continue_evt.wait()", None, None),
+            ("wait", "await _core.wait_task_rescheduled(abort_fn)", None, None),
+        ],
+    )
+    assert_stack_matches(
         stacks["late"],
         [
             ("run", "await value.setup_done.wait()", None, None),
@@ -1095,6 +1117,10 @@ def test_pytest_trio_glue() -> None:
     )
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 12),
+    reason="https://github.com/python-greenlet/greenlet/issues/388",
+)
 def test_greenback() -> None:
     trio = pytest.importorskip("trio")
     greenback = pytest.importorskip("greenback")

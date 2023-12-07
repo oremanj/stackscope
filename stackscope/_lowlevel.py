@@ -793,9 +793,16 @@ def analyze_with_blocks(code: types.CodeType) -> Dict[int, Context]:
             # Allow for EXTENDED_ARG(s) before LOAD_CONST None
             while is_async and insns[idx + skip_insns - 5].opname == "EXTENDED_ARG":
                 skip_insns += 1
-            if is_async and sys.version_info >= (3, 12, 0, "alpha", 6):
-                # SEND stackeffect changed, resulting in an extra SWAP 2 + POP_TOP
-                skip_insns += 2
+            if is_async:
+                if sys.version_info >= (3, 12, 0, "beta", 1):
+                    # After 411b169281 there is an END_SEND bytecode after
+                    # the jump, to deal with changed SEND stackeffect more
+                    # efficiently than the below
+                    skip_insns += 1
+                elif sys.version_info >= (3, 12, 0, "alpha", 6):  # pragma: no cover
+                    # 160f2fe2b9 changed SEND stackeffect, resulting in
+                    # an extra SWAP 2 + POP_TOP
+                    skip_insns += 2
             store_to = describe_assignment_target(insns, idx + skip_insns)
             cleanup_offset = start_to_handler[insns[idx + skip_insns].offset]
             with_block_info[cleanup_offset] = Context(

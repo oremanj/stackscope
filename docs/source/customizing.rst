@@ -179,5 +179,6 @@ Customization hooks reference
 
 .. autofunction:: customize
 .. autofunction:: unwrap_context
+.. autofunction:: unwrap_context_generator
 .. autofunction:: elaborate_context
 .. autofunction:: fill_context
