@@ -2,6 +2,7 @@ import contextlib
 import gc
 import re
 import sys
+import time
 import threading
 import types
 import dataclasses
@@ -612,31 +613,42 @@ def test_running_in_thread():
         thread = threading.Thread(target=thread_caller, args=(arrived_evt, depart_evt))
         thread.start()
         try:
-            arrived_evt.wait()
-            if cooked:
-                stack = extract(thread)
-            else:
-                top_frame = sys._current_frames()[thread.ident]
-                while (
-                    top_frame.f_back is not None
-                    and top_frame.f_code.co_name != "thread_caller"
+
+            def trim_threading_internals(stack):  # pragma: no cover
+                # Exactly where we are inside Event.wait() is indeterminate, so
+                # strip frames until we find Event.wait() and then remove it.
+                # We could also be in Event.set().
+                while stack.frames and (
+                    not stack.frames[-1].filename.endswith("threading.py")
+                    or stack.frames[-1].funcname not in ("set", "wait")
                 ):
-                    top_frame = top_frame.f_back
-                stack = extract_since(top_frame)
+                    stack.frames = stack.frames[:-1]
+                if not stack.frames:
+                    return False
+                while stack.frames and stack.frames[-1].filename.endswith(
+                    "threading.py"
+                ):
+                    stack.frames = stack.frames[:-1]
+                return True
 
-            # Exactly where we are inside Event.wait() is indeterminate, so
-            # strip frames until we find Event.wait() and then remove it
-
-            while stack.frames and (
-                not stack.frames[-1].filename.endswith("threading.py")
-                or stack.frames[-1].funcname != "wait"
-            ):  # pragma: no cover
-                stack.frames = stack.frames[:-1]
-            while stack.frames and stack.frames[-1].filename.endswith(
-                "threading.py"
-            ):  # pragma: no cover
-                stack.frames = stack.frames[:-1]
-            assert stack.frames, (cooked, thread, thread.ident, sys._current_frames())
+            arrived_evt.wait()
+            deadline = time.monotonic() + 10
+            while True:
+                if cooked:
+                    stack = extract(thread)
+                else:
+                    top_frame = sys._current_frames()[thread.ident]
+                    while (
+                        top_frame.f_back is not None
+                        and top_frame.f_code.co_name != "thread_caller"
+                    ):
+                        top_frame = top_frame.f_back
+                    stack = extract_since(top_frame)
+                if time.monotonic() >= deadline:  # pragma: no cover
+                    sys.stderr.write("{}\n".format(stack))
+                    pytest.fail("Couldn't get a thread traceback in Event.wait()")
+                if trim_threading_internals(stack):  # pragma: no branch
+                    break
 
             assert_stack_matches(
                 stack,
