@@ -698,7 +698,7 @@ def glue_trio() -> None:
 
         return None  # pragma: no cover
 
-    if trio_threads := getattr(trio, "_threads", None):
+    if trio_threads := getattr(trio, "_threads", None):  # pragma: no branch
         for clsname, fnname in (
             ("Run", "run"),
             ("Run", "run_system"),
@@ -708,7 +708,7 @@ def glue_trio() -> None:
         ):
             cls = getattr(trio_threads, clsname, None)
             fn = getattr(cls, fnname, None)
-            if fn is not None:
+            if fn is not None:  # pragma: no branch
                 customize(fn, hide=True)
 
 
