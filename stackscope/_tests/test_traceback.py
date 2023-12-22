@@ -372,10 +372,6 @@ def test_suspended():
     assert_stack_matches(extract(coro), [])
 
 
-@pytest.mark.skipif(
-    sys.version_info >= (3, 12),
-    reason="https://github.com/python-greenlet/greenlet/issues/388",
-)
 def test_greenlet():
     greenlet = pytest.importorskip("greenlet")
 
@@ -1130,10 +1126,6 @@ def test_pytest_trio_glue() -> None:
     )
 
 
-@pytest.mark.skipif(
-    sys.version_info >= (3, 12),
-    reason="https://github.com/python-greenlet/greenlet/issues/388",
-)
 def test_greenback() -> None:
     trio = pytest.importorskip("trio")
     greenback = pytest.importorskip("greenback")
