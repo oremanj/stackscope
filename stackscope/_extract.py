@@ -74,10 +74,16 @@ def extract_iter(
 
     _glue.add_glue_as_needed()
 
-    to_unwrap: Deque[Tuple[Optional[StackItem], StackItem]] = collections.deque()
-    to_elaborate: Deque[Union[Frame, StackItem]] = collections.deque()
+    # to_unwrap items are (origin, stackitem, depth)
+    to_unwrap: Deque[Tuple[Optional[StackItem], StackItem, int]] = collections.deque()
+    # to_elaborate items are (frame or leaf, depth)
+    to_elaborate: Deque[Tuple[Union[Frame, StackItem], int]] = collections.deque()
+    # In both of these cases, depth is the number of layers of unwrapping
+    # that were done to reach the item. It's used to ensure that
+    # elaborate_frame() can only prune things that are logically 'inward'
+    # of the frame it's looking at.
 
-    to_unwrap.append((better_origin(stackitem, None), stackitem))
+    to_unwrap.append((better_origin(stackitem, None), stackitem, 0))
     while to_unwrap or to_elaborate:
         # Unwrap until we have a frame and the thing that comes after it
         # (which might be 'nothing', if it's the innermost frame).
@@ -87,7 +93,7 @@ def extract_iter(
         while to_unwrap and (
             len(to_elaborate) < 2 or not isinstance(to_elaborate[0], Frame)
         ):
-            origin, current = to_unwrap.popleft()
+            origin, current, depth = to_unwrap.popleft()
             if isinstance(current, types.FrameType):
                 if not isinstance(
                     origin,
@@ -101,7 +107,7 @@ def extract_iter(
                 current = Frame(pyframe=current, origin=origin)
             if isinstance(current, Frame):
                 loops_since_progress = 0
-                to_elaborate.append(current)
+                to_elaborate.append((current, depth))
                 continue
             try:
                 unwrapped = unwrap_stackitem(current)
@@ -117,7 +123,7 @@ def extract_iter(
                 save_errors.append(ex)
             if unwrapped is None:
                 loops_since_progress = 0
-                to_elaborate.append(current)
+                to_elaborate.append((current, depth))
                 continue
 
             if isinstance(unwrapped, FrameIterator):
@@ -141,22 +147,22 @@ def extract_iter(
                 rev_items = (unwrapped,)
             for item in rev_items:
                 if item is not None:
-                    to_unwrap.appendleft((better_origin(item, origin), item))
+                    to_unwrap.appendleft((better_origin(item, origin), item, depth + 1))
 
         if not to_elaborate:
             break
 
-        if not isinstance(to_elaborate[0], Frame):
+        if not isinstance(to_elaborate[0][0], Frame):
             # We've reached a leaf
             assert not to_unwrap
             if len(to_elaborate) > 1:
-                return list(to_elaborate)
-            return to_elaborate[0]
+                return list(item[0] for item in to_elaborate)
+            return to_elaborate[0][0]
 
         # Grab the first frame, and fill in context managers if requested
-        frame = to_elaborate.popleft()
+        frame, depth = to_elaborate.popleft()
         assert isinstance(frame, Frame)
-        next_inner = to_elaborate[0] if to_elaborate else None
+        next_inner = to_elaborate[0][0] if to_elaborate else None
 
         if with_contexts:
             next_pyframe = next_inner.pyframe if isinstance(next_inner, Frame) else None
@@ -189,20 +195,26 @@ def extract_iter(
             items = replacement
         else:
             items = (replacement,)
-        if items and items[-1] is next_inner:
-            # Inserting before the rest of the stack trace
-            while to_elaborate:
-                # Any origin info has already been stored on the Frame,
-                # so we don't need to track it separately (that's the None)
-                to_unwrap.appendleft((None, to_elaborate.pop()))
-            for item in reversed(items[:-1]):
-                to_unwrap.appendleft((better_origin(item, None), item))
+
+        # We're replacing or augmenting the rest of the stack trace (at
+        # this depth or below), so anything behind this in the elaboration
+        # queue will need to move back to the unwrapping queue
+        while to_elaborate:
+            # Any origin info has already been stored on the Frame,
+            # so we don't need to track it separately (that's the None)
+            to_unwrap.appendleft((None, *to_elaborate.pop()))
+
+        if not items or items[-1] is not next_inner:
+            # Replacing the rest of the stack trace at this depth
+            while to_unwrap and to_unwrap[0][2] >= depth:
+                to_unwrap.popleft()
         else:
-            # Replacing the rest of the stack trace
-            to_elaborate.clear()
-            to_unwrap.clear()
-            for item in items:
-                to_unwrap.append((better_origin(item, None), item))
+            # Only inserting new items into the stack trace; since
+            # next_inner is in both `items` and `to_unwrap`, remove it
+            # from the latter
+            to_unwrap.popleft()
+        for item in reversed(items):
+            to_unwrap.appendleft((better_origin(item, None), item, depth))
 
     return None
 

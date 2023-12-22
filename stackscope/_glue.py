@@ -540,8 +540,20 @@ def glue_outcome() -> None:
     customize(outcome.acapture, hide=True)
 
 
+@builtin_glue("contextvars")
+def glue_contextvars() -> None:
+    import contextvars
+
+    # Don't show Context.run() in tracebacks even if it's implemented in
+    # Python (which is only true these days on pypy). On CPython it's
+    # implemented in C and will be hidden with or without this logic.
+    if isinstance(contextvars.Context.run, types.FunctionType):
+        customize(contextvars.Context.run, hide=True)
+
+
 @builtin_glue("trio")
 def glue_trio() -> None:
+    import threading
     import trio
 
     try:
@@ -576,6 +588,128 @@ def glue_trio() -> None:
     @elaborate_context.register(nursery_manager_type)
     def elaborate_nursery(manager: Any, context: Context) -> None:
         context.obj = manager._nursery
+
+    @elaborate_frame.register(trio.to_thread.run_sync)
+    def elaborate_to_thread_run_sync(frame: Frame, next_inner: object) -> object:
+        thread_name = frame.pyframe.f_locals.get("thread_name")
+        worker_fn = frame.pyframe.f_locals.get("worker_fn")
+        sync_fn = frame.pyframe.f_locals.get("sync_fn")
+        if not (thread_name and worker_fn and sync_fn):  # pragma: no cover
+            # We're in the initial setup-y part, thread not running yet
+            return None
+
+        # Find the thread that's hosting the sync_fn
+        for thread in threading.enumerate():
+            if thread.name is thread_name:
+                break
+        else:  # pragma: no cover
+            # Thread isn't running yet
+            return None
+
+        # Find the actual frames where the sync_fn and its callees are running
+        inner_frame = sys._current_frames().get(thread.ident or 0)
+        previous: types.FrameType | None = None
+        current = inner_frame
+        while current is not None and current.f_code is not worker_fn.__code__:
+            previous = current
+            current = current.f_back
+        if current is None or previous is None:  # pragma: no cover
+            # We either didn't find the worker_fn, or it didn't have a callee.
+            # Thread isn't doing anything interesting yet.
+            return None
+
+        frame.hide = True
+        thread_stack = StackSlice(inner=inner_frame, outer=previous)
+        if (
+            isinstance(next_inner, Frame)
+            and next_inner.funcname == "wait_task_rescheduled"
+        ):
+            # Waiting for the thread to do something
+            return thread_stack
+        # Otherwise, the to_thread.run_sync task is most likely executing a
+        # reentrant from_thread.run_* call made by the sync_fn. Include the
+        # thread's stack but then switch back to the Trio task.
+        return (thread_stack, next_inner)
+
+    @elaborate_frame.register(trio.from_thread.run)
+    def elaborate_from_thread_run(frame: Frame, next_inner: object) -> object:
+        missing = object()
+        token_provided = frame.pyframe.f_locals.get("token_provided")
+        trio_token = frame.pyframe.f_locals.get("trio_token", missing)
+        if trio_token is missing:  # pragma: no cover
+            return None
+        if token_provided is None:  # pragma: no cover
+            # Trio v0.23.1 had token_provided; v0.24+ don't
+            token_provided = trio_token is not None
+        if not token_provided:
+            # No trio_token specified, so this is a reentrant call
+            # back into Trio from a to_thread.run_sync() function.
+            # The in-Trio portion will show up in the stack of
+            # to_thread.run_sync() so don't duplicate it here.
+            # Prune the plumbing (_send_message_to_trio, Queue.get(), etc)
+            # that's inward of here on the thread's stack.
+            frame.hide = True
+            return ()
+
+        # If a trio_token was specified, then this is a call that did not
+        # ultimately originate in Trio, so we should try to follow the link
+        # back to the Trio task if possible.
+        message = frame.pyframe.f_locals.get("message_to_trio")
+        if (
+            message is None
+            and isinstance(next_inner, Frame)
+            and next_inner.funcname == "_send_message_to_trio"
+        ):  # pragma: no cover  # depends on Trio minor version
+            message = next_inner.pyframe.f_locals.get("message_to_trio")
+        if message is not None:  # pragma: no branch
+            # Find the Trio runner that this token refers to
+            runner = None
+            try:
+                runner_tlocals = trio._core._run.GLOBAL_RUN_CONTEXT  # type: ignore
+            except AttributeError:  # pragma: no cover
+                return None
+            for ref in gc.get_referents(runner_tlocals):
+                if not isinstance(ref, dict):
+                    continue
+                for key, value in ref.items():
+                    if key == "runner" and value.trio_token is trio_token:
+                        # PyPy style: each thread's thread-locals dict is
+                        # directly referenced by the threading.local instance
+                        runner = value
+                        break
+                    if isinstance(value, dict) and (  # pragma: no branch
+                        runner := value.get("runner")
+                    ):
+                        # CPython style: each thread's thread-locals dict is
+                        # a value in one big dict keyed by weakrefs
+                        if runner.trio_token is trio_token:  # pragma: no branch
+                            break
+                else:  # pragma: no cover
+                    continue
+                break
+            else:  # pragma: no cover
+                return None
+
+            # Find the system task that matches this call
+            for task in runner.system_nursery.child_tasks:  # pragma: no branch
+                if task.context is message.context:  # pragma: no branch
+                    frame.hide = True
+                    return task.coro
+
+        return None  # pragma: no cover
+
+    if trio_threads := getattr(trio, "_threads", None):  # pragma: no branch
+        for clsname, fnname in (
+            ("Run", "run"),
+            ("Run", "run_system"),
+            ("Run", "unprotected_afn"),
+            ("RunSync", "run_sync"),
+            ("RunSync", "unprotected_fn"),
+        ):
+            cls = getattr(trio_threads, clsname, None)
+            fn = getattr(cls, fnname, None)
+            if fn is not None:  # pragma: no branch
+                customize(fn, hide=True)
 
 
 @builtin_glue("pytest_trio.plugin")

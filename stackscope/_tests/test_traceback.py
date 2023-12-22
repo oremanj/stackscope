@@ -8,7 +8,7 @@ import types
 import dataclasses
 from contextlib import ExitStack, AsyncExitStack, contextmanager
 from functools import partial
-from typing import List, Callable, Any, AsyncIterator, cast
+from typing import List, Callable, Any, AsyncIterator, cast, TYPE_CHECKING
 
 import pytest
 
@@ -1001,6 +1001,103 @@ def test_trio_nursery():
             ("main", "await trio.lowlevel.wait_task_rescheduled(no_abort)", None, None),
         ],
     )
+
+
+def test_trio_threads():
+    if TYPE_CHECKING:
+        import trio
+        import outcome
+    else:
+        trio = pytest.importorskip("trio")
+        outcome = pytest.importorskip("outcome")
+    main_task = None
+
+    async def back_in_trio_fn() -> None:
+        stack = extract(main_task.coro)
+        # This tests tracing from a to_thread.run_sync fn back into Trio
+        # when it calls from_thread.run
+        assert_stack_matches(
+            stack,
+            [
+                ("main", "await trio.to_thread.run_sync(thread_fn)", None, None),
+                ("thread_fn", "trio.from_thread.run(back_in_trio_fn)", None, None),
+                ("back_in_trio_fn", "stack = extract(main_task.coro)", None, None),
+            ],
+        )
+
+    def thread_fn() -> None:
+        stack = extract(main_task.coro)
+        # Trim off everything inside extract():
+        for i, frame in enumerate(stack.frames):  # pragma: no branch
+            if frame.pyframe is sys._getframe(0):
+                stack.frames = stack.frames[: i + 1]
+                break
+        # This tests tracing from a to_thread.run_sync call into the thread
+        # that it spawned
+        assert_stack_matches(
+            stack,
+            [
+                ("main", "await trio.to_thread.run_sync(thread_fn)", None, None),
+                ("thread_fn", "stack = extract(main_task.coro)", None, None),
+            ],
+        )
+        trio.from_thread.run(back_in_trio_fn)
+
+    async def trio_from_other_thread_fn(
+        other_thread: threading.Thread, done_evt: trio.Event
+    ) -> None:
+        stack = extract(other_thread)
+        # This tests tracing from a non-Trio-originated thread into the
+        # Trio task that it created using from_thread.run
+        assert_stack_matches(
+            stack,
+            [
+                (
+                    "other_thread_fn",
+                    "other_thread_outcome = outcome.capture(",
+                    None,
+                    None,
+                ),
+                (
+                    "trio_from_other_thread_fn",
+                    "stack = extract(other_thread)",
+                    None,
+                    None,
+                ),
+            ],
+        )
+
+    other_thread_outcome = None
+
+    def other_thread_fn(
+        trio_token: trio.lowlevel.TrioToken, done_evt: trio.Event
+    ) -> None:
+        nonlocal other_thread_outcome
+        other_thread_outcome = outcome.capture(
+            trio.from_thread.run,
+            trio_from_other_thread_fn,
+            threading.current_thread(),
+            done_evt,
+            trio_token=trio_token,
+        )
+        trio_token.run_sync_soon(done_evt.set)
+
+    async def main() -> None:
+        nonlocal main_task
+        main_task = trio.lowlevel.current_task()
+        await trio.to_thread.run_sync(thread_fn)
+
+        # Now try with the callstack originating outside Trio, to test
+        # the from_thread.run() glue
+        done_evt = trio.Event()
+        other_thread = threading.Thread(
+            target=other_thread_fn, args=(trio.lowlevel.current_trio_token(), done_evt)
+        )
+        other_thread.start()
+        await done_evt.wait()
+        other_thread_outcome.unwrap()
+
+    trio.run(main)
 
 
 def test_pytest_trio_glue() -> None:
