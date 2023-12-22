@@ -55,6 +55,10 @@ stack that led to the :func:`extract` call, then either pass a
 `stackscope.StackSlice` or use the convenience aliases
 :func:`extract_since` and :func:`extract_until`.
 
+Trio users: Try ``print(stackscope.extract(trio.lowlevel.current_root_task(),
+recurse_child_tasks=True))`` to print the entire task tree of your
+Trio program.
+
 Once you have a `Stack`, you can:
 
 * Format it for human consumption: ``str()`` obtains a tree view as

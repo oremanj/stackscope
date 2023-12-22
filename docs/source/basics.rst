@@ -12,8 +12,8 @@ It comes in several variants:
 * :func:`extract` accepts a "stack item", which is anything stackscope
   knows how to turn into a series of frame objects. This might be a
   `StackSlice`, coroutine object, generator iterator, thread,
-  greenlet, or anything else for which a library author (maybe you)
-  have added support through the :func:`unwrap_stackitem`
+  greenlet, `trio.lowlevel.Task`, or anything else for which a library
+  author (maybe you) have added support through the :func:`unwrap_stackitem`
   customization hook.
 
 * :func:`extract_since` and :func:`extract_until` obtain a stack for
@@ -68,6 +68,12 @@ organize the data returned by :func:`extract`.
 
       The series of frames (individual calls) in the call stack,
       from outermost/oldest to innermost/newest.
+
+   .. autoattribute:: root
+
+      The object that was originally passed to :func:`extract` to produce
+      this stack trace, or `None` if the trace was created from a
+      `StackSlice` (which doesn't carry any information beyond the frames).
 
    .. autoattribute:: leaf
 
@@ -214,9 +220,11 @@ organize the data returned by :func:`extract`.
 
    .. autoattribute:: children
 
-      The other context managers nested inside this one, if applicable.
-      For example, an `~contextlib.ExitStack` will have one entry here
-      per thing that was pushed on the stack.
+      The other context managers or child task stacks that are
+      logically nested inside this one, if applicable.  For example,
+      an `~contextlib.ExitStack` will have one entry here per thing
+      that was pushed on the stack, and a `trio.Nursery` will have one
+      entry per child task running in the nursery.
 
    .. autoattribute:: hide
 

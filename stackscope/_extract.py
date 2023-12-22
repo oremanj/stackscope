@@ -8,14 +8,17 @@ import gc
 import inspect
 import itertools
 import sys
+import threading
 import types
 import weakref
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
     Deque,
     Generator,
     Iterable,
+    Iterator,
     List,
     Optional,
     Sequence,
@@ -23,6 +26,7 @@ from typing import (
     TypeVar,
     Union,
     TYPE_CHECKING,
+    cast,
 )
 
 if sys.version_info < (3, 11):
@@ -35,7 +39,6 @@ from ._customization import (
     elaborate_frame,
     unwrap_context,
     elaborate_context,
-    fill_context,
     FrameIterator,
     PRUNE,
 )
@@ -43,7 +46,14 @@ from ._lowlevel import contexts_active_in_frame
 from . import _glue
 
 
-__all__ = ["extract", "extract_outermost", "extract_since", "extract_until"]
+__all__ = [
+    "extract",
+    "extract_outermost",
+    "extract_since",
+    "extract_until",
+    "extract_child",
+    "fill_context",
+]
 
 
 def better_origin(candidate: object, fallback: object) -> object:
@@ -60,10 +70,26 @@ def better_origin(candidate: object, fallback: object) -> object:
         return fallback
 
 
+class ExtractOptions(threading.local):
+    with_contexts: bool = cast(bool, None)
+    recurse_child_tasks: bool = cast(bool, None)
+
+    @contextmanager
+    def push(self, *, with_contexts: bool, recurse_child_tasks: bool) -> Iterator[None]:
+        prev = (self.with_contexts, self.recurse_child_tasks)
+        self.with_contexts = with_contexts
+        self.recurse_child_tasks = recurse_child_tasks
+        try:
+            yield
+        finally:
+            (self.with_contexts, self.recurse_child_tasks) = prev
+
+
+current_options = ExtractOptions()
+
+
 def extract_iter(
-    stackitem: StackItem,
-    save_errors: List[Exception],
-    with_contexts: bool,
+    stackitem: StackItem, save_errors: List[Exception]
 ) -> Generator[Frame, None, StackItem]:
     """Implements the common logic of extract() and extract_outermost().
 
@@ -72,6 +98,7 @@ def extract_iter(
     traversal are saved to the list *save_errors*.
     """
 
+    assert current_options.with_contexts is not None
     _glue.add_glue_as_needed()
 
     # to_unwrap items are (origin, stackitem, depth)
@@ -164,7 +191,7 @@ def extract_iter(
         assert isinstance(frame, Frame)
         next_inner = to_elaborate[0][0] if to_elaborate else None
 
-        if with_contexts:
+        if current_options.with_contexts:
             next_pyframe = next_inner.pyframe if isinstance(next_inner, Frame) else None
             try:
                 frame.contexts = contexts_active_in_frame(
@@ -219,7 +246,12 @@ def extract_iter(
     return None
 
 
-def extract(stackitem: StackItem, *, with_contexts: bool = True) -> Stack:
+def extract(
+    stackitem: StackItem,
+    *,
+    with_contexts: bool = True,
+    recurse_child_tasks: bool = False,
+) -> Stack:
     """Extract a `Stack` from *stackitem*.
 
     *stackitem* may be anything that has a stack associated with it.
@@ -239,14 +271,51 @@ def extract(stackitem: StackItem, *, with_contexts: bool = True) -> Stack:
     don't care about this information, then specifying ``with_contexts=False``
     will substantially simplify the stack extraction process.
 
+    Some context managers might logically contain other tasks that
+    each have their own `Stack`: `trio.Nursery`, `asyncio.TaskGroup`,
+    etc. These will be listed as `Context.children` in the returned
+    `Frame.contexts` for these context managers. If
+    *recurse_child_tasks* is False (the default), then these "child
+    tasks" will be rendered as stub `Stack` objects with only a
+    `~Stack.root` (the child task object) but no `~Stack.frames`. If
+    *recurse_child_tasks* is True, then the child stacks will be fully
+    populated, including grandchildren and so on.
+
     :func:`extract` tries not to throw exceptions; any exception should
     be reported as a bug. Errors encountered during stack extraction
     are reported in the `~Stack.error` attribute of the returned
     object. If multiple errors are encountered, they will be wrapped in
     an `ExceptionGroup`.
+
     """
+    with current_options.push(
+        with_contexts=with_contexts, recurse_child_tasks=recurse_child_tasks
+    ):
+        return extract_child(stackitem, for_task=False)
+
+
+def extract_child(stackitem: StackItem, *, for_task: bool) -> Stack:
+    """Perform a recursive call equivalent to ``extract(stackitem)``, but
+    reusing the options that were passed to the original ``extract()``.
+    You should only call this from within a :ref:`customization hook
+    <customizing>` such as :func:`elaborate_context`.
+
+    If *for_task* is True, then this nested *stackitem* is considered to
+    represent an async child task. Its stack will be fully extracted only
+    if the outer ``extract()`` call specified ``recurse_child_tasks=True``;
+    otherwise you will get a stub `Stack` with a `~Stack.root` but no
+    `~Stack.frames`.
+    """
+    if current_options.recurse_child_tasks is None:
+        raise RuntimeError(
+            "extract_child() may only be called from within a customization "
+            "hook invoked by extract()"
+        )
+    if for_task and not current_options.recurse_child_tasks:
+        return Stack(root=stackitem, frames=[])
+
     errors: List[Exception] = []
-    it = extract_iter(stackitem, errors, with_contexts=with_contexts)
+    it = extract_iter(stackitem, errors)
     frames = []
     while True:
         try:
@@ -259,10 +328,20 @@ def extract(stackitem: StackItem, *, with_contexts: bool = True) -> Stack:
                 )
             else:
                 error = errors[0] if errors else None
-            return Stack(frames=frames, leaf=ex.value, error=error)
+            return Stack(
+                root=(None if isinstance(stackitem, StackSlice) else stackitem),
+                frames=frames,
+                leaf=ex.value,
+                error=error,
+            )
 
 
-def extract_outermost(stackitem: StackItem, *, with_contexts: bool = True) -> Frame:
+def extract_outermost(
+    stackitem: StackItem,
+    *,
+    with_contexts: bool = True,
+    recurse_child_tasks: bool = False,
+) -> Frame:
     """Extract the outermost `Frame` from *stackitem*.
 
     :func:`extract_outermost` produces the same result as calling :func:`extract`
@@ -271,28 +350,34 @@ def extract_outermost(stackitem: StackItem, *, with_contexts: bool = True) -> Fr
     no `Frame`\\s, an exception will be thrown.
     """
 
-    errors: List[Exception] = []
-    try:
-        return next(extract_iter(stackitem, errors, with_contexts=with_contexts))
-    except StopIteration as ex:
-        if len(errors) > 1:  # pragma: no cover
-            # Rationale for 'no cover': as currently written, only one error can
-            # be saved while unwrapping, and errors raised at other points wouldn't
-            # reach here because a frame would be available
-            raise ExceptionGroup(
-                "multiple errors encountered while extracting stack", errors
-            )
-        if errors:
-            raise errors[0]
-        else:
-            raise RuntimeError(
-                f"Couldn't extract a frame from {stackitem!r}: unwrapping only "
-                f"reached {ex.value!r}"
-            )
+    with current_options.push(
+        with_contexts=with_contexts, recurse_child_tasks=recurse_child_tasks
+    ):
+        errors: List[Exception] = []
+        try:
+            return next(extract_iter(stackitem, errors))
+        except StopIteration as ex:
+            if len(errors) > 1:  # pragma: no cover
+                # Rationale for 'no cover': as currently written, only one error can
+                # be saved while unwrapping, and errors raised at other points wouldn't
+                # reach here because a frame would be available
+                raise ExceptionGroup(
+                    "multiple errors encountered while extracting stack", errors
+                )
+            if errors:
+                raise errors[0]
+            else:
+                raise RuntimeError(
+                    f"Couldn't extract a frame from {stackitem!r}: unwrapping only "
+                    f"reached {ex.value!r}"
+                )
 
 
 def extract_since(
-    outer_frame: Optional[types.FrameType], *, with_contexts: bool = True
+    outer_frame: Optional[types.FrameType],
+    *,
+    with_contexts: bool = True,
+    recurse_child_tasks: bool = False,
 ) -> Stack:
     """Return a `Stack` reflecting the currently-executing frames that were
     directly or indirectly called by *outer_frame*, including *outer_frame* itself.
@@ -326,7 +411,11 @@ def extract_since(
     """
     if outer_frame is not None and not isinstance(outer_frame, types.FrameType):
         raise TypeError(f"outer_frame must be a frame, not {type(outer_frame)!r}")
-    return extract(StackSlice(outer=outer_frame))
+    return extract(
+        StackSlice(outer=outer_frame),
+        with_contexts=with_contexts,
+        recurse_child_tasks=recurse_child_tasks,
+    )
 
 
 def extract_until(
@@ -334,6 +423,7 @@ def extract_until(
     *,
     limit: Union[int, types.FrameType, None] = None,
     with_contexts: bool = True,
+    recurse_child_tasks: bool = False,
 ) -> Stack:
     """Return a `Stack` reflecting the currently executing frames that are
     direct or indirect callers of *inner_frame*, including
@@ -357,6 +447,7 @@ def extract_until(
     its inputs (an exception will be raised if *limit* has an invalid type
     or is a frame that isn't an indirect caller of *inner_frame*).
     """
+    opts = {"with_contexts": with_contexts, "recurse_child_tasks": recurse_child_tasks}
     if isinstance(limit, types.FrameType):
         outer_frame: Optional[types.FrameType] = inner_frame
         while (
@@ -369,10 +460,46 @@ def extract_until(
             outer_frame = outer_frame.f_back
         if outer_frame is None:
             raise RuntimeError(f"{limit} is not an indirect caller of {inner_frame}")
-        return extract(StackSlice(outer=outer_frame, inner=inner_frame))
+        return extract(StackSlice(outer=outer_frame, inner=inner_frame), **opts)
     elif isinstance(limit, int) or limit is None:
-        return extract(StackSlice(inner=inner_frame, limit=limit))
+        return extract(StackSlice(inner=inner_frame, limit=limit), **opts)
     else:
         raise TypeError(
             f"'limit' argument must be a frame or integer, not {type(limit)!r}"
+        )
+
+
+def fill_context(context: Context) -> None:
+    """Augment the given newly-constructed `Context` object using the
+    context manager hooks (:func:`unwrap_context` and :func:`elaborate_context`),
+    calling both hooks in a loop until a steady state is reached.
+    """
+    if current_options.with_contexts is None:
+        # Allow fill_context() to be used outside an extract() call, even
+        # though the hooks it's calling might assume they're inside extract()
+        with current_options.push(with_contexts=True, recurse_child_tasks=False):
+            fill_context(context)
+        return
+
+    for _ in range(100):
+        if TYPE_CHECKING:
+            from typing import ContextManager, AsyncContextManager
+
+            assert isinstance(context.obj, (ContextManager, AsyncContextManager))
+        elaborate_context(context.obj, context)
+        inner_mgr = unwrap_context(context.obj, context)
+        if inner_mgr is None:
+            break
+        if inner_mgr == PRUNE:
+            context.hide = True
+            break
+        context.obj = inner_mgr
+        context.inner_stack = None
+        context.children = ()
+    else:
+        inner_mgr = unwrap_context(context.obj, context)  # type: ignore
+        raise RuntimeError(
+            f"{context.obj!r} has been unwrapped more than 100 times "
+            f"without reaching something irreducible; probably an "
+            f"infinite loop? (next result is {inner_mgr!r})"
         )

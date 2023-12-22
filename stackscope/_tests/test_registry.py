@@ -212,9 +212,5 @@ def test_glue_error(local_registry, monkeypatch):
         stackscope._glue.add_glue_as_needed()
 
 
-def test_unwrap_nothing():
-    assert stackscope.unwrap_context_generator(stackscope.Stack([])) is None
-
-
 def test_prune():
     repr(stackscope.PRUNE)

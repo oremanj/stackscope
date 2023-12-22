@@ -37,7 +37,6 @@ __all__ = [
     "unwrap_context_generator",
     "elaborate_context",
     "customize",
-    "fill_context",
     "yields_frames",
     "PRUNE",
 ]
@@ -148,9 +147,11 @@ def elaborate_frame(
 @functools.singledispatch
 def unwrap_context(
     manager: ContextManager[Any] | AsyncContextManager[Any],
+    context: Context,
 ) -> None | ContextManager[Any] | AsyncContextManager[Any] | tuple[()]:
     """Hook for extracting an inner context manager from another
-    context manager that wraps it. Return None if there is no further
+    context manager that wraps it. The stackscope *context* object is
+    also provided in case it's useful. Return None if there is no further
     unwrapping to do. Return `PRUNE` (equivalent to an empty tuple)
     to hide this context manager from the traceback. Unlike
     :func:`unwrap_stackitem`, it is not currently supported to let the
@@ -166,23 +167,22 @@ def unwrap_context(
     return None
 
 
-def _code_of_first_frame(stack: Stack) -> types.CodeType:
-    if not stack.frames:
-        # arbitrary code object that no one will register
-        return _code_of_first_frame.__code__
-    return stack.frames[0].pyframe.f_code
-
-
-@code_dispatch(_code_of_first_frame)
+@code_dispatch(_code_of_frame)
 def unwrap_context_generator(
-    inner_stack: Stack,
+    frame: Frame, context: Context
 ) -> None | ContextManager[Any] | AsyncContextManager[Any] | tuple[()]:
-    """Hook for extracting an inner context manager from the
-    *inner_stack* of a generator-based context manager that wraps it.
-    This hook uses `@code_dispatch <stackscope.lowlevel.code_dispatch>`,
-    so it can be customized based on the identity of the function that
-    implements the context manager (the outermost frame in *inner_stack*).
-    Apart from that, its semantics are equivalent to :func:`unwrap_context`.
+    """Hook for extracting an inner context manager from the outermost
+    *frame* of a generator-based context manager that wraps it.  This
+    hook uses `@code_dispatch <stackscope.lowlevel.code_dispatch>`, so
+    it can be customized based on the identity of the function that
+    implements the context manager.  Apart from that, its semantics
+    are equivalent to :func:`unwrap_context`.
+
+    .. note:: If the context manager you're unwrapping uses ``yield from``,
+       it's possible that you'll need to access callees of *frame* to
+       implement your logic. You can find these using `Context.inner_stack`,
+       or if that's None because the context is currently exiting, you can
+       reconstruct it using ``stackscope.extract(context.obj.gen)``.
     """
     return None
 
@@ -198,33 +198,6 @@ def elaborate_context(
     the provided *manager* (the actual context manager, i.e., the thing
     whose type has ``__enter__`` and ``__exit__`` attributes).
     """
-
-
-def fill_context(context: Context) -> None:
-    """Augment the given newly-constructed `Context` object using the
-    context manager hooks (:func:`unwrap_context` and :func:`elaborate_context`),
-    calling both hooks in a loop until a steady state is reached.
-    """
-    for _ in range(100):
-        if TYPE_CHECKING:
-            from typing import ContextManager, AsyncContextManager
-
-            assert isinstance(context.obj, (ContextManager, AsyncContextManager))
-        elaborate_context(context.obj, context)
-        inner_mgr = unwrap_context(context.obj)
-        if inner_mgr is None:
-            break
-        if inner_mgr == PRUNE:
-            context.hide = True
-            break
-        context.obj = inner_mgr
-    else:
-        inner_mgr = unwrap_context(context.obj)  # type: ignore
-        raise RuntimeError(
-            f"{context.obj!r} has been unwrapped more than 100 times "
-            f"without reaching something irreducible; probably an "
-            f"infinite loop? (next result is {inner_mgr!r})"
-        )
 
 
 @overload
