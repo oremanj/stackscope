@@ -3,6 +3,8 @@ Customizing stackscope for your library
 
 .. currentmodule:: stackscope
 
+.. _customizing:
+
 `stackscope` contains several customization hooks that allow it to be
 adapted to provide good stack traces for context managers, awaitables,
 and control-flow primitives that it doesn't natively know anything about.

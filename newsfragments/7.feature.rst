@@ -1,0 +1,5 @@
+A library can now ship its own :ref:`stackscope customizations <customizing>`
+without requiring that all of its users install stackscope. Any module may
+define a function called ``_stackscope_install_glue_()``, which stackscope will
+call when it is first used to extract a stack trace after the module has been
+imported.

@@ -62,7 +62,6 @@ InstallGlueFn = Callable[[], None]
 builtin_glue_pending: Dict[str, InstallGlueFn] = {}
 
 
-
 def builtin_glue(needs_module: str) -> Callable[[InstallGlueFn], InstallGlueFn]:
     """Returns a decorator which marks the function it decorates as
     providing glue for *needs_module*. The decorated function will be
