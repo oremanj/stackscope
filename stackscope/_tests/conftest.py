@@ -36,6 +36,9 @@ def local_registry():
     with ExitStack() as stack:
         stack.enter_context(save_restore_contents(builtin_glue_pending))
         stack.enter_context(save_restore_contents(cust.elaborate_frame.registry))
+        stack.enter_context(
+            save_restore_contents(cust.unwrap_context_generator.registry)
+        )
         for hook in each_singledispatch():
             stack.callback(hook._clear_cache)
             stack.enter_context(save_restore_contents(hook.registry))

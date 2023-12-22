@@ -63,6 +63,20 @@ builtin_glue_pending: Dict[str, InstallGlueFn] = {}
 
 
 def builtin_glue(needs_module: str) -> Callable[[InstallGlueFn], InstallGlueFn]:
+    """Returns a decorator which marks the function it decorates as
+    providing glue for *needs_module*. The decorated function will be
+    called at most once, on the first attempt to extract a stack after
+    *needs_module* has been loaded, in order to set up customizations
+    that depend on that module.
+
+    Modules may also provide their own glue, by defining a top-level
+    function named ``_stackscope_install_glue_``. This function will
+    similarly be called at most once, on the first attempt to extract
+    a stack after the module defining it has been loaded. If both
+    module-provided and builtin glue exist for the same module, then
+    only the module-provided glue will run.
+    """
+
     def decorate(fn: InstallGlueFn) -> InstallGlueFn:
         assert needs_module not in builtin_glue_pending
         if needs_module in sys.modules and "sphinx" not in sys.modules:
@@ -74,31 +88,47 @@ def builtin_glue(needs_module: str) -> Callable[[InstallGlueFn], InstallGlueFn]:
     return decorate
 
 
-def add_glue_as_needed() -> None:
-    for module_name in list(builtin_glue_pending):
-        if module_name in sys.modules:
+glue_lock = threading.Lock()
+
+
+def add_glue_as_needed(*, _sys_modules_len_cache: list[int] = [0]) -> None:
+    if len(sys.modules) == _sys_modules_len_cache[0]:
+        return
+    # Use a lock to avoid races between multiple threads trying to extract
+    # tracebacks simultaneously
+    with glue_lock:
+        module_names = tuple(sys.modules)
+        for module_name in module_names:
+            builtin_fn = builtin_glue_pending.pop(module_name, None)
             try:
-                install_fn = builtin_glue_pending.pop(module_name)
-            except KeyError:
-                # Probably two simultaneous calls occurring in
-                # different threads; the effect of glue is global
-                # so just skip it under the assumption that
-                # someone else got this one.
-                pass
-            else:
-                try:
-                    install_fn()
-                except Exception as exc:
-                    warnings.warn(
-                        "Failed to initialize glue for {}: {}. Some tracebacks may be "
-                        "presented less crisply or with missing information.".format(
-                            module_name,
-                            "".join(
-                                traceback.format_exception_only(type(exc), exc)
-                            ).strip(),
-                        ),
-                        RuntimeWarning,
-                    )
+                module_fn = sys.modules[module_name].__dict__.pop(
+                    "_stackscope_install_glue_", None
+                )
+            except Exception:  # module disappeared, doesn't have a dict, etc
+                module_fn = None
+            try:
+                # Prefer the module-supplied glue over our builtin version
+                # in case both are present
+                if module_fn is not None:
+                    module_fn()
+                elif builtin_fn is not None:
+                    builtin_fn()
+            except Exception as exc:
+                kind = (
+                    "module-provided" if module_fn is not None else "stackscope-builtin"
+                )
+                exc_str = "".join(
+                    traceback.format_exception_only(type(exc), exc)
+                ).strip()
+                warnings.warn(
+                    f"Failed to initialize {kind} glue for {module_name}: {exc_str}. "
+                    "Some tracebacks may be presented less crisply or with "
+                    "missing information.",
+                    RuntimeWarning,
+                )
+        # Only update the length cache if we visited every module (rather
+        # than bailing out with an exception)
+        _sys_modules_len_cache[0] = len(module_names)
 
 
 functools_singledispatch_wrapper = get_code(functools.singledispatch, "wrapper")
