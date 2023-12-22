@@ -1,0 +1,18 @@
+Added support for representing child tasks in structured concurrency libraries,
+by allowing `Context.children` to contain `Stack`\s in addition to the
+existing support for child `Context`\s. By default, the child tasks will
+not have their frames filled out, but you can override this with the new
+*recurse_child_tasks* parameter to :func:`extract`.
+
+Added a new attribute `Stack.root` which preserves the original "stack item"
+object that was passed to :func:`extract`. For stacks generated from async
+child tasks, this will be the ``Task`` object.
+
+Added a new function :func:`extract_child` for use in customization hooks.
+It is like :func:`extract` except that it reuses the options that were
+specified for the outer :func:`extract` call, and contains some additional
+logic to prune child task frames if the outer :func:`extract` didn't ask
+for them.
+
+Updated Trio glue to support unwrapping `trio.lowlevel.Task`\s and filling
+in the child tasks of a `trio.Nursery`.

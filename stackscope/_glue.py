@@ -37,7 +37,6 @@ from ._customization import (
     unwrap_context,
     unwrap_context_generator,
     elaborate_context,
-    fill_context,
     yields_frames,
 )
 from . import _extract
@@ -373,7 +372,7 @@ def glue_contextlib() -> None:
         # is currently exiting, since we'll see them later in the traceback
         # anyway
         if not context.is_exiting:
-            context.inner_stack = _extract.extract(mgr.gen)
+            context.inner_stack = _extract.extract_child(mgr.gen, for_task=False)
         if hasattr(mgr, "func"):
             context.description = format_funcall(mgr.func, mgr.args, mgr.kwds)
         else:
@@ -381,7 +380,7 @@ def glue_contextlib() -> None:
             context.description = f"{mgr.gen.__qualname__}(...)"
 
     @unwrap_context.register(GCMBase)
-    def unwrap_generatorbased_contextmanager(mgr: Any) -> Any:
+    def unwrap_generatorbased_contextmanager(mgr: Any, context: Context) -> Any:
         mgr_code: types.CodeType
         if hasattr(mgr.gen, "gi_code"):
             mgr_code = mgr.gen.gi_code
@@ -390,7 +389,18 @@ def glue_contextlib() -> None:
         else:  # pragma: no cover
             return None
         if mgr_code in unwrap_context_generator.registry:
-            return unwrap_context_generator(_extract.extract(mgr.gen))
+            if context.inner_stack is not None:
+                if context.inner_stack.frames:
+                    return unwrap_context_generator(
+                        context.inner_stack.frames[0], context
+                    )
+            else:
+                try:
+                    frame = _extract.extract_outermost(mgr.gen)
+                except RuntimeError:  # no frames
+                    pass
+                else:
+                    return unwrap_context_generator(frame, context)
         return None
 
     @elaborate_context.register(ExitStackBase)
@@ -454,7 +464,7 @@ def glue_contextlib() -> None:
                 varname=f"{stackname}[{idx}]",
                 start_line=context.start_line,
             )
-            fill_context(child_context)
+            _extract.fill_context(child_context)
             child_context.description = f"{tag}{stackname}.{method}({child_context.description or arg or '...'})"
             children.append(child_context)
 
@@ -522,7 +532,7 @@ def glue_async_generator() -> None:
         # is currently exiting, since we'll see them later in the traceback
         # anyway
         if not context.is_exiting:
-            context.inner_stack = _extract.extract(mgr._agen)
+            context.inner_stack = _extract.extract_child(mgr._agen, for_task=False)
         context.description = f"{mgr._func_name}(...)"
 
 
@@ -575,6 +585,10 @@ def glue_trio() -> None:
         if hasattr(lowlevel, trap):  # pragma: no branch
             customize(getattr(lowlevel, trap), hide=True, prune=True)
 
+    @unwrap_stackitem.register(lowlevel.Task)
+    def unwrap_task(task: lowlevel.Task) -> Any:
+        return task.coro
+
     async def get_nursery_type() -> Type[Any]:
         return type(trio.open_nursery())
 
@@ -588,6 +602,11 @@ def glue_trio() -> None:
     @elaborate_context.register(nursery_manager_type)
     def elaborate_nursery(manager: Any, context: Context) -> None:
         context.obj = manager._nursery
+        assert isinstance(context.obj, trio.Nursery)
+        context.children = [
+            _extract.extract_child(child_task, for_task=True)
+            for child_task in context.obj.child_tasks
+        ]
 
     @elaborate_frame.register(trio.to_thread.run_sync)
     def elaborate_to_thread_run_sync(frame: Frame, next_inner: object) -> object:
@@ -744,14 +763,14 @@ def glue_pytest_trio() -> None:
 
     @unwrap_context_generator.register(pytest_trio.plugin.TrioFixture._fixture_manager)
     def unwrap_fixture_manager(
-        stack: Stack,
+        frame: Frame, context: Context
     ) -> None | AsyncContextManager[Any] | tuple[()]:
         # Replace the internal _fixture_manager context (which is itself
         # uninteresting) with the nursery that it contains (which might
         # be hosting relevant portions of the test logic that we don't
         # wish to hide). If that nursery has nothing in it, then hide it.
-        if stack.frames[0].contexts and isinstance(
-            nursery := stack.frames[0].contexts[0].obj, trio.Nursery
+        if frame.contexts and isinstance(
+            nursery := frame.contexts[0].obj, trio.Nursery
         ):
             if nursery.child_tasks:
                 return cast(AsyncContextManager[Any], nursery)
@@ -861,5 +880,5 @@ def glue_greenback() -> None:
         return frame.pyframe.f_locals.get("coro")
 
     @unwrap_context.register(greenback.async_context)
-    def unwrap_greenback_async_context(manager: Any) -> Any:
+    def unwrap_greenback_async_context(manager: Any, context: Context) -> Any:
         return manager._cm

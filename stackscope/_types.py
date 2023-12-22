@@ -92,6 +92,7 @@ class Stack(Formattable):
     of frames it contains.
     """
 
+    root: object
     frames: Sequence[Frame]
     leaf: object = None
     error: Optional[Exception] = None
@@ -102,12 +103,18 @@ class Stack(Formattable):
     def __iter__(self) -> Iterator[Frame]:
         return iter(self.frames)
 
+    def _format_header(self) -> str:
+        if self.root is not None:
+            return f"stackscope.Stack of {self.root!r} (most recent call last):\n"
+        else:
+            return "stackscope.Stack (most recent call last):\n"
+
     def _format(self, opts: FormatOptions) -> List[str]:
         start_frame = "+ " if opts.ascii_only else "╠ "
         continue_frame = "| " if opts.ascii_only else "║ "
         start_leaf = "+ " if opts.ascii_only else "╚ "
 
-        lines = ["stackscope.Stack (most recent call last):\n"]
+        lines = [self._format_header()]
         for frame in self.frames:
             if frame.hide and not opts.show_hidden_frames:
                 continue
@@ -130,7 +137,7 @@ class Stack(Formattable):
         Context manager information is not included by default, but can be
         requested using the *show_contexts* parameter.
         """
-        lines = ["stackscope.Stack (most recent call last):\n"]
+        lines = [self._format_header()]
         if self.frames:
             lines.extend(self.as_stdlib_summary(show_contexts=show_contexts).format())
         if self.leaf is not None:
@@ -400,7 +407,7 @@ class Context(Formattable):
     start_line: Optional[int] = None
     description: Optional[str] = None
     inner_stack: Optional[Stack] = None
-    children: Sequence[Context] = ()
+    children: Sequence[Context | Stack] = ()
     hide: bool = False
 
     def _name_and_type(self) -> str:
@@ -441,12 +448,13 @@ class Context(Formattable):
                 capture_locals=capture_locals,
             )
         for subctx in self.children:
-            yield from subctx._frame_summaries(
-                parent,
-                show_hidden_frames,
-                capture_locals,
-                "# " + (subctx.description or repr(subctx)),
-            )
+            if isinstance(subctx, Context):
+                yield from subctx._frame_summaries(
+                    parent,
+                    show_hidden_frames,
+                    capture_locals,
+                    "# " + (subctx.description or repr(subctx)),
+                )
 
     def _format(
         self,
@@ -484,8 +492,23 @@ class Context(Formattable):
         lines = [linetext + "\n"]
         if self.inner_stack is not None:
             lines.extend(self.inner_stack._format(opts)[1:])
-        for subctx in self.children:
-            for idx, line in enumerate(subctx._format(opts, show_lineno=False)):
+        did_blank = False
+        for child in self.children:
+            if isinstance(child, Context):
+                sublines = child._format(opts, show_lineno=False)
+            else:  # child task stack
+                sublines = child._format(opts)
+                if child.root is not None:
+                    sublines[0] = f"{child.root!r}\n"
+                else:
+                    sublines[0] = "<unidentified child>\n"
+                if child.frames:
+                    # Add a blank line on each side of child task stacks
+                    if not did_blank:
+                        lines.append(continue_child + "\n")
+                    sublines.append("\n")
+            did_blank = sublines and not sublines[-1].strip()
+            for idx, line in enumerate(sublines):
                 marker = start_child if idx == 0 else continue_child
                 lines.append(marker + line)
         return lines

@@ -16,6 +16,8 @@ if sys.version_info < (3, 11):
     from exceptiongroup import ExceptionGroup
 
 from stackscope import (
+    Context,
+    Frame,
     Stack,
     StackSlice,
     customize,
@@ -24,8 +26,11 @@ from stackscope import (
     extract_since,
     extract_until,
     extract_outermost,
+    extract_child,
+    fill_context,
     unwrap_stackitem,
     unwrap_context,
+    unwrap_context_generator,
 )
 
 
@@ -959,48 +964,71 @@ def test_trio_nursery():
     @async_generator.async_generator
     async def uses_nursery():
         async with trio.open_nursery() as inner:  # noqa: F841
+            inner.start_soon(trio.sleep_forever, name="inner_child")
             await async_generator.yield_()
+            inner.cancel_scope.cancel()
 
-    async def main() -> Stack:
+    async def main(recurse: bool) -> Stack:
         result: Stack
         task = trio.lowlevel.current_task()
 
         def report_back():
             nonlocal result
-            result = extract(task.coro)
+            result = extract(task.coro, recurse_child_tasks=recurse)
             trio.lowlevel.reschedule(task)
 
         async with trio.open_nursery() as outer, uses_nursery():  # noqa: F841
+            outer.start_soon(trio.sleep_forever, name="outer_child1")
+            outer.start_soon(trio.sleep_forever, name="outer_child2")
             trio.lowlevel.current_trio_token().run_sync_soon(report_back)
             await trio.lowlevel.wait_task_rescheduled(no_abort)
+            outer.cancel_scope.cancel()
 
         return result
 
-    assert_stack_matches(
-        trio.run(main),
-        [
-            (
-                "main",
-                "async with trio.open_nursery() as outer, uses_nursery():",
-                "outer",
-                "Nursery",
-            ),
-            (
-                "main",
-                "async with trio.open_nursery() as outer, uses_nursery():",
-                None,
-                "_AsyncGeneratorContextManager",
-            ),
-            (
-                "uses_nursery",
-                "async with trio.open_nursery() as inner:",
-                "inner",
-                "Nursery",
-            ),
-            ("uses_nursery", "await async_generator.yield_()", None, None),
-            ("main", "await trio.lowlevel.wait_task_rescheduled(no_abort)", None, None),
-        ],
-    )
+    for recurse in (False, True):
+        stack = trio.run(main, recurse)
+        # assert_stack_matches() uses flatten() which doesn't show child tasks,
+        # so produces the same output for both
+        assert_stack_matches(
+            stack,
+            [
+                (
+                    "main",
+                    "async with trio.open_nursery() as outer, uses_nursery():",
+                    "outer",
+                    "Nursery",
+                ),
+                (
+                    "main",
+                    "async with trio.open_nursery() as outer, uses_nursery():",
+                    None,
+                    "_AsyncGeneratorContextManager",
+                ),
+                (
+                    "uses_nursery",
+                    "async with trio.open_nursery() as inner:",
+                    "inner",
+                    "Nursery",
+                ),
+                ("uses_nursery", "await async_generator.yield_()", None, None),
+                ("main", "await trio.lowlevel.wait_task_rescheduled(no_abort)", None, None),
+            ],
+        )
+        print(stack)
+        cstacks = (
+            stack.frames[0].contexts[0].children
+            + stack.frames[0].contexts[1].inner_stack.frames[0].contexts[0].children
+        )
+        if cstacks[0].root.name > cstacks[1].root.name:
+            cstacks[0], cstacks[1] = cstacks[1], cstacks[0]
+        names = [cstack.root.name for cstack in cstacks]
+        assert names == ["outer_child1", "outer_child2", "inner_child"]
+        if recurse:
+            for cstack in cstacks:
+                assert cstack.frames[0].funcname == "sleep_forever"
+        else:
+            assert all(not cstack.frames for cstack in cstacks)
 
 
 def test_trio_threads():
@@ -1560,7 +1588,7 @@ def test_unwrap_loops(local_registry: None) -> None:
             return "<CM>"
 
     @unwrap_context.register(CM)
-    def dont_unwrap_cm(cm: CM) -> CM:
+    def dont_unwrap_cm(cm: CM, context: Any) -> CM:
         return cm
 
     with CM():
@@ -1663,3 +1691,42 @@ def test_extract_outermost(local_registry: None) -> None:
 
     with pytest.raises(RuntimeError, match="unwrapping only reached 'hello'"):
         extract_outermost("hello")
+
+
+def test_extract_child_invalid() -> None:
+    with pytest.raises(RuntimeError, match="may only be called from within"):
+        extract_child(None, for_task=False)
+
+
+def test_unwrap_gcm(local_registry: None) -> None:
+    @unwrap_context_generator.register(null_context)
+    def unwrap_nullcontext(frame: Frame, context: Any) -> Any:
+        return 42
+
+    cm = null_context()
+    context = Context(obj=cm, is_async=False)
+    with cm:
+        pass
+    # Exhausted generator has no frame, thus can't find the unwrapper
+    fill_context(context)
+    assert context.obj is cm
+    assert context.inner_stack is not None and not context.inner_stack.frames
+
+    # Try the branch with no inner_stack
+    context = Context(obj=cm, is_async=False, is_exiting=True)
+    fill_context(context)
+    assert context.obj is cm
+    assert context.inner_stack is None
+
+    # Now try both of these with a GCM that does have an associated frame.
+    # These should find the above unwrapper successfully
+    cm = null_context()
+    context = Context(obj=cm, is_async=False)
+    fill_context(context)
+    assert context.obj == 42
+    assert context.inner_stack is None
+
+    context = Context(obj=cm, is_async=False, is_exiting=True)
+    fill_context(context)
+    assert context.obj == 42
+    assert context.inner_stack is None

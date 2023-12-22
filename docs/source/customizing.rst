@@ -175,6 +175,13 @@ Example: glue for handling generator-based `@contextmanager <contextlib.contextm
         context.description = f"{mgr.gen.__qualname__}(...)"
 
 
+Utilities for use in customization hooks
+----------------------------------------
+
+.. autofunction:: extract_child
+.. autofunction:: fill_context
+
+
 Customization hooks reference
 -----------------------------
 
@@ -192,4 +199,3 @@ Customization hooks reference
 .. autofunction:: unwrap_context
 .. autofunction:: unwrap_context_generator
 .. autofunction:: elaborate_context
-.. autofunction:: fill_context
