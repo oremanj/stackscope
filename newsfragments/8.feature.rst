@@ -1,0 +1,5 @@
+stackscope can now trace seamlessly across Trio/thread boundaries when
+extracting a stack that includes calls to :func:`trio.to_thread.run_sync`
+and/or :func:`trio.from_thread.run`. The functions running in the
+cross-thread child will appear in the same way that they would if they
+had been called directly without a thread transition.
