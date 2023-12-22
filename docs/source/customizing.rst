@@ -18,17 +18,26 @@ If you're working with a library that could be better-supported by stackscope,
 you have two options for implementing that support:
 
 * If you maintain the library that the customizations are intended to
-  support, and you're willing to let your library take an optional
-  dependency on `stackscope`, then just ``import stackscope`` and
-  perform your customizations by registering hook implementations when
-  your library is imported. stackscope is a fairly lightweight import:
-  33ms on the author's laptop including standard-library dependencies.
+  support, then define a function named ``_stackscope_install_glue_``
+  at top level in any of your library's module(s), which takes no
+  arguments and returns None. The body of the function should register
+  customization hooks appropriate to your library, using the
+  stackscope APIs described in the rest of this section. As long as you
+  only write ``import stackscope`` inside the body of the glue installation
+  function, this won't require that users of your library install stackscope,
+  but they will benefit from your glue if they do.
 
-* If you're contributing glue for a library you don't maintain, or you're
-  not willing to import stackscope from your library, you can put the glue
-  in stackscope instead. We have glue for several modules and a system that
-  avoids registering it unless the module has been imported. See
-  ``stackscope/_glue.py``, and feel free to submit a PR.
+* If you're contributing glue for a library you don't maintain, you
+  can put the glue in stackscope instead. We have glue for several
+  modules and a system that avoids registering it unless the module
+  has been imported. See ``stackscope/_glue.py``, and feel free to
+  submit a PR.
+
+If the same module has glue implemented using both of these methods,
+then the glue provided by the module will be used; the glue
+shipped with stackscope is ignored. This allows for a module's glue to
+start out being shipped with stackscope and later "graduate" to being
+maintained upstream.
 
 Overview of customization hooks
 -------------------------------

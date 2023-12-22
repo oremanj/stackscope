@@ -1,5 +1,6 @@
 import sys
 import threading
+import types
 from dataclasses import dataclass, field
 from functools import partial, wraps
 from typing import Optional
@@ -170,55 +171,31 @@ def test_registration_through_nested(local_registry):
     assert inner_fn()
 
 
-def test_install_concurrently(local_registry, monkeypatch):
-    def one_fn():
+def test_module_beats_local(local_registry, monkeypatch):
+    def subject_fn():
         return not stackscope.extract_since(sys._getframe(0)).frames[0].hide
 
-    def two_fn():
-        return not stackscope.extract_since(sys._getframe(0)).frames[0].hide
-
-    one_started = threading.Event()
-    two_waiting = threading.Event()
-    two_started = threading.Event()
     record = []
 
-    def glue_one():
-        record.append("one")
-        one_started.set()
-        two_started.wait()
-        stackscope.customize(one_fn, hide=True)
+    def builtin_glue():  # pragma: no cover
+        record.append("builtin")
+        stackscope.customize(subject_fn, hide=True)
 
-    def glue_two():
-        record.append("two")
-        two_waiting.set()
-        one_started.wait()
-        two_started.set()
-        stackscope.customize(two_fn, hide=True)
+    def module_glue():
+        record.append("module")
+        stackscope.customize(subject_fn, hide=True)
 
-    assert one_fn()
-    assert two_fn()
+    assert subject_fn()
 
-    monkeypatch.setitem(stackscope._glue.builtin_glue_pending, "test_two", glue_two)
-    monkeypatch.setitem(stackscope._glue.builtin_glue_pending, "test_one", glue_one)
-    monkeypatch.setitem(sys.modules, "test_one", None)
-    monkeypatch.setitem(sys.modules, "test_two", None)
+    monkeypatch.setitem(
+        stackscope._glue.builtin_glue_pending, "stackscope_test_mod", builtin_glue
+    )
+    module = types.ModuleType("stackscope_test_mod")
+    module._stackscope_install_glue_ = module_glue
+    monkeypatch.setitem(sys.modules, "stackscope_test_mod", module)
 
-    # Ordering here: t2 installs glue_two first (since it was added to the
-    # dict first) and blocks there. Then t1 installs glue_one, and the two
-    # race to register their rules simultaneously. t2 will later try to install
-    # glue_one and find it already taken by another thread.
-
-    t2 = threading.Thread(target=stackscope._glue.add_glue_as_needed, daemon=True)
-    t2.start()
-    two_waiting.wait()
-    t1 = threading.Thread(target=stackscope._glue.add_glue_as_needed, daemon=True)
-    t1.start()
-    t1.join()
-    t2.join()
-    assert record == ["two", "one"]
-
-    assert not one_fn()
-    assert not two_fn()
+    assert not subject_fn()
+    assert record == ["module"]
 
 
 def test_glue_error(local_registry, monkeypatch):
@@ -228,7 +205,10 @@ def test_glue_error(local_registry, monkeypatch):
     monkeypatch.setitem(stackscope._glue.builtin_glue_pending, "test_one", glue_whoops)
     monkeypatch.setitem(sys.modules, "test_one", None)
 
-    with pytest.warns(RuntimeWarning, match="Failed to initialize glue for test_one"):
+    with pytest.warns(
+        RuntimeWarning,
+        match="Failed to initialize stackscope-builtin glue for test_one",
+    ):
         stackscope._glue.add_glue_as_needed()
 
 
