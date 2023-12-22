@@ -1,4 +1,0 @@
-The :func:`unwrap_context` and :func:`unwrap_context_generator` hooks now
-accept an additional `Context` argument. This saves on duplicated effort
-between :func:`elaborate_context` and :func:`unwrap_context`, avoiding
-exponential time complexity in some pathological cases.
