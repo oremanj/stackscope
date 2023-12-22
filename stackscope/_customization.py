@@ -167,13 +167,6 @@ def unwrap_context(
     return None
 
 
-def _code_of_first_frame(stack: Stack) -> types.CodeType:
-    if not stack.frames:
-        # arbitrary code object that no one will register
-        return _code_of_first_frame.__code__
-    return stack.frames[0].pyframe.f_code
-
-
 @code_dispatch(_code_of_frame)
 def unwrap_context_generator(
     frame: Frame, context: Context

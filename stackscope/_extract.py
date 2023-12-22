@@ -47,7 +47,12 @@ from . import _glue
 
 
 __all__ = [
-    "extract", "extract_outermost", "extract_since", "extract_until", "extract_child", "fill_context",
+    "extract",
+    "extract_outermost",
+    "extract_since",
+    "extract_until",
+    "extract_child",
+    "fill_context",
 ]
 
 

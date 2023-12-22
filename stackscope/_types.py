@@ -507,7 +507,7 @@ class Context(Formattable):
                     if not did_blank:
                         lines.append(continue_child + "\n")
                     sublines.append("\n")
-            did_blank = sublines and not sublines[-1].strip()
+            did_blank = bool(sublines and not sublines[-1].strip())
             for idx, line in enumerate(sublines):
                 marker = start_child if idx == 0 else continue_child
                 lines.append(marker + line)

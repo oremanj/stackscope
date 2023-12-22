@@ -1012,7 +1012,12 @@ def test_trio_nursery():
                     "Nursery",
                 ),
                 ("uses_nursery", "await async_generator.yield_()", None, None),
-                ("main", "await trio.lowlevel.wait_task_rescheduled(no_abort)", None, None),
+                (
+                    "main",
+                    "await trio.lowlevel.wait_task_rescheduled(no_abort)",
+                    None,
+                    None,
+                ),
             ],
         )
         print(stack)
@@ -1647,6 +1652,9 @@ def test_format_oddities():
     ctx = Context(obj=None, varname="foo", is_async=False)
     assert ctx.format() == ["with <???>:  # foo\n"]
 
+    ctx.children = [Stack(root=None, frames=[])]
+    assert ctx.format(ascii_only=True)[1] == ". <unidentified child>\n"
+
     def no_locals():
         yield
 
@@ -1699,14 +1707,18 @@ def test_extract_child_invalid() -> None:
 
 
 def test_unwrap_gcm(local_registry: None) -> None:
-    @unwrap_context_generator.register(null_context)
-    def unwrap_nullcontext(frame: Frame, context: Any) -> Any:
-        return 42
-
     cm = null_context()
     context = Context(obj=cm, is_async=False)
     with cm:
         pass
+
+    # Smoke test of base case where no registered unwrapper matches
+    unwrap_context(null_context(), context)
+
+    @unwrap_context_generator.register(null_context)
+    def unwrap_nullcontext(frame: Frame, context: Any) -> Any:
+        return 42
+
     # Exhausted generator has no frame, thus can't find the unwrapper
     fill_context(context)
     assert context.obj is cm
