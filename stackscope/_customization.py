@@ -207,8 +207,7 @@ def customize(
     hide_line: bool = False,
     prune: bool = False,
     elaborate: Optional[Callable[[Frame, object], object]] = None,
-) -> Callable[[T], T]:
-    ...
+) -> Callable[[T], T]: ...
 
 
 @overload
@@ -219,8 +218,7 @@ def customize(
     hide_line: bool = False,
     prune: bool = False,
     elaborate: Optional[Callable[[Frame, object], object]] = None,
-) -> T:
-    ...
+) -> T: ...
 
 
 def customize(
