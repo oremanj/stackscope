@@ -289,6 +289,38 @@ def test_unexpected_aexit_sequence():
             coro.send(None)
 
 
+@pytest.mark.parametrize("throws", (False, True))
+def test_acm_in_finally(throws):
+    @contextlib.asynccontextmanager
+    async def inner():
+        yield
+
+    async def example():
+        try:
+            yield 1
+        finally:
+            async with inner() as icm:
+                yield 2
+
+    agen = example()
+    with pytest.raises(StopIteration, match="1"):
+        agen.asend(None).send(None)
+    assert ssll.contexts_active_in_frame(agen.ag_frame) == []
+
+    with pytest.raises(StopIteration, match="2"):
+        if throws:
+            agen.athrow(ValueError).send(None)
+        else:
+            agen.asend(None).send(None)
+    (ctx,) = ssll.contexts_active_in_frame(agen.ag_frame)
+    assert ctx.is_async and not ctx.is_exiting
+    assert ctx.varname == "icm"
+    assert ctx.start_line == example.__code__.co_firstlineno + 4
+    assert ctx.obj.gen.ag_code is inner.__wrapped__.__code__
+    with pytest.raises(ValueError if throws else StopAsyncIteration):
+        agen.asend(None).send(None)
+
+
 def test_dangling_frame():
     def capture_it():
         return sys._getframe(0)

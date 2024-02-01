@@ -794,6 +794,14 @@ def analyze_with_blocks(code: types.CodeType) -> Dict[int, Context]:
             while is_async and insns[idx + skip_insns - 5].opname == "EXTENDED_ARG":
                 skip_insns += 1
             if is_async:
+                if (
+                    sys.version_info >= (3, 12)
+                    and insns[idx + skip_insns].opname == "CLEANUP_THROW"
+                ):
+                    # This can show up before END_SEND in some cases such as an
+                    # async CM inside a finally block. It is not reachable
+                    # except via an exception; the prior SEND arg jumps over it.
+                    skip_insns += 1
                 if sys.version_info >= (3, 12, 0, "beta", 1):
                     # After 411b169281 there is an END_SEND bytecode after
                     # the jump, to deal with changed SEND stackeffect more

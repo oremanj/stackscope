@@ -1,0 +1,4 @@
+Fix inspection of async context managers that contain a ``CLEANUP_THROW``
+bytecode instruction in their ``__aenter__`` sequence. This can appear on 3.12+
+if you write an async context manager inside an ``except`` or ``finally`` block,
+and would previously produce an inspection warning.
