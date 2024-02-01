@@ -299,7 +299,7 @@ def test_acm_in_finally(throws):
         try:
             yield 1
         finally:
-            async with inner() as icm:
+            async with inner() as icm:  # noqa: F841
                 yield 2
 
     agen = example()

@@ -89,12 +89,10 @@ class IdentityDict(MutableMapping[K, V]):
     _marker = object()
 
     @overload
-    def pop(self, key: K) -> V:
-        ...
+    def pop(self, key: K) -> V: ...
 
     @overload
-    def pop(self, key: K, default: Union[V, T] = ...) -> Union[V, T]:
-        ...
+    def pop(self, key: K, default: Union[V, T] = ...) -> Union[V, T]: ...
 
     def pop(self, key: K, default: object = _marker) -> object:
         try:
@@ -195,8 +193,7 @@ class _CodeDispatcher(Generic[T, P, R]):
             code: Union[types.CodeType, Callable[..., Any]],
             *nested_names: str,
             func: Callable[Concatenate[T, P], R],
-        ) -> Callable[Concatenate[T, P], R]:
-            ...
+        ) -> Callable[Concatenate[T, P], R]: ...
 
         @overload
         def register(
@@ -204,8 +201,9 @@ class _CodeDispatcher(Generic[T, P, R]):
             code: Union[types.CodeType, Callable[..., Any]],
             *nested_names: str,
             func: None = None,
-        ) -> Callable[[Callable[Concatenate[T, P], R]], Callable[Concatenate[T, P], R]]:
-            ...
+        ) -> Callable[
+            [Callable[Concatenate[T, P], R]], Callable[Concatenate[T, P], R]
+        ]: ...
 
         def register(
             self,
@@ -215,11 +213,9 @@ class _CodeDispatcher(Generic[T, P, R]):
         ) -> Callable[..., Any]:
             raise NotImplementedError
 
-        def dispatch(self, arg: T) -> Callable[Concatenate[T, P], R]:
-            ...
+        def dispatch(self, arg: T) -> Callable[Concatenate[T, P], R]: ...
 
-        def __call__(self, __first_arg: T, *args: P.args, **kwargs: P.kwargs) -> R:
-            ...
+        def __call__(self, __first_arg: T, *args: P.args, **kwargs: P.kwargs) -> R: ...
 
 
 def code_dispatch(
