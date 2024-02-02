@@ -1,3 +1,0 @@
-The first invocation of :func:`stackscope.extract` no longer leaves a
-partially-exhausted async generator object to be garbage collected,
-which previously could confuse async generator finalization hooks.
