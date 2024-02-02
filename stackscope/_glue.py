@@ -302,8 +302,14 @@ def glue_builtins() -> None:
 
     # Get the types of the internal awaitables used in native async
     # generator asend/athrow calls
-    asend_type = type(some_asyncgen().asend(None))
-    athrow_type = type(some_asyncgen().athrow(ValueError))
+    agen = some_asyncgen()
+    asend_type = type(agen.asend(None))
+    athrow_type = type(agen.athrow(ValueError))
+    try:
+        # Clean up the asyncgen so it doesn't confuse any finalization hooks
+        agen.aclose().send(None)
+    except (StopIteration, StopAsyncIteration):
+        pass
 
     async def some_afn() -> None:
         pass  # pragma: no cover
