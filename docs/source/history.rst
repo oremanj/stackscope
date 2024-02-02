@@ -5,6 +5,21 @@ Release history
 
 .. towncrier release notes start
 
+stackscope 0.2.1 (2024-02-02)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Fixed inspection of async context managers that contain a ``CLEANUP_THROW``
+  bytecode instruction in their ``__aenter__`` sequence. This can appear on 3.12+
+  if you write an async context manager inside an ``except`` or ``finally`` block,
+  and would previously produce an inspection warning. (`#11 <https://github.com/oremanj/stackscope/issues/11>`__)
+- The first invocation of :func:`stackscope.extract` no longer leaves a
+  partially-exhausted async generator object to be garbage collected,
+  which previously could confuse async generator finalization hooks. (`#12 <https://github.com/oremanj/stackscope/issues/12>`__)
+
+
 stackscope 0.2.0 (2023-12-22)
 -----------------------------
 
