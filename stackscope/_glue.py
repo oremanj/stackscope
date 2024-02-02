@@ -307,7 +307,7 @@ def glue_builtins() -> None:
     athrow_type = type(agen.athrow(ValueError))
     try:
         # Clean up the asyncgen so it doesn't confuse any finalization hooks
-        agen.aclose().send(None)
+        agen.aclose().send(None)  # type: ignore
     except (StopIteration, StopAsyncIteration):
         pass
 
