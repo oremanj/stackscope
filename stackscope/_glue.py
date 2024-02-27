@@ -845,7 +845,7 @@ def glue_greenback() -> None:
     if hasattr(greenback._impl, "trampoline"):
 
         @elaborate_frame.register(greenback._impl.trampoline)
-        def elaborate_greenback_shim(frame: Frame, next_inner: object) -> object:
+        def elaborate_trampoline(frame: Frame, next_inner: object) -> object:
             frame.hide = True
             if isinstance(next_inner, Frame):
                 # Coroutine is suspended at an await_(); continue tracing into
