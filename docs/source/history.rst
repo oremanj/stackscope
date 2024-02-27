@@ -5,6 +5,18 @@ Release history
 
 .. towncrier release notes start
 
+stackscope 0.2.2 (2024-02-27)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Fixed an inspection error that could occur on Python 3.11 when the subject
+  expression of an ``async with`` block covers multiple source lines. (`#14 <https://github.com/oremanj/stackscope/issues/14>`__)
+- Update `greenback` glue to support the internal reorganizations in
+  version 1.2.0. (`#15 <https://github.com/oremanj/stackscope/issues/15>`__)
+
+
 stackscope 0.2.1 (2024-02-02)
 -----------------------------
 
