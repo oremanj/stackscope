@@ -837,6 +837,29 @@ def glue_greenlet() -> None:
 def glue_greenback() -> None:
     import greenback
 
+    if sys.implementation.name == "pypy":
+        import functools
+
+        customize(functools.partial.__call__, hide=True)
+
+    if hasattr(greenback._impl, "trampoline"):  # pragma: no branch
+
+        @elaborate_frame.register(greenback._impl.trampoline)
+        def elaborate_trampoline(frame: Frame, next_inner: object) -> object:
+            frame.hide = True
+            if isinstance(next_inner, Frame):
+                # Coroutine is suspended at an await_(); continue tracing into
+                # it via the greenlet stack
+                return None
+            elif orig_coro := frame.pyframe.f_locals.get("orig_coro"):
+                # Coroutine is suspended at a regular await
+                return orig_coro
+            else:  # pragma: no cover
+                raise RuntimeError(
+                    "Can't identify what's going on with the greenback trampoline "
+                    "in this frame"
+                )
+
     @elaborate_frame.register(greenback._impl._greenback_shim)
     def elaborate_greenback_shim(frame: Frame, next_inner: object) -> object:
         frame.hide = True
@@ -850,11 +873,12 @@ def glue_greenback() -> None:
         child_greenlet = frame.pyframe.f_locals.get("child_greenlet")
         orig_coro = frame.pyframe.f_locals.get("orig_coro")
         gr_frame = getattr(child_greenlet, "gr_frame", None)
-        if gr_frame is not None:
+        # NB: gr_frame can be None only on greenback below 1.2.0
+        if gr_frame is not None:  # pragma: no branch
             # Yep; switch to walking the greenlet stack, since orig_coro
             # will look "running" but it's not on any thread's stack.
             return child_greenlet
-        elif orig_coro is not None:
+        elif orig_coro is not None:  # pragma: no cover
             # No greenlet, so child is suspended at a regular await.
             # Continue the traceback by walking the coroutine's frames.
             return orig_coro
