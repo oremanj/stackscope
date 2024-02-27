@@ -160,6 +160,29 @@ def test_jump_out_of_context():
         assert exc_info.value.value == arg * 10
 
 
+def test_multiline_with():
+    async def example():
+        with contextlib.nullcontext(
+            # multiline
+        ) as n:  # noqa: F841
+            async with YieldsDuringAexit(
+                # multiline
+            ) as y:  # noqa: F841
+                yield
+
+    agen = example()
+    with pytest.raises(StopIteration):
+        agen.asend(None).send(None)
+    cc = ssll.contexts_active_in_frame(agen.ag_frame)
+    assert not cc[0].is_async and not cc[0].is_exiting and cc[0].varname == "n"
+    assert cc[1].is_async and not cc[1].is_exiting and cc[1].varname == "y"
+
+    assert agen.asend(None).send(None) == 42
+    cc = ssll.contexts_active_in_frame(agen.ag_frame)
+    assert not cc[0].is_async and not cc[0].is_exiting and cc[0].varname == "n"
+    assert cc[1].is_async and cc[1].is_exiting and cc[1].varname == "y"
+
+
 def test_context_all_exits_are_jumps():
     async def afn(throw):
         async with YieldsDuringAexit() as mgr:  # noqa: F841

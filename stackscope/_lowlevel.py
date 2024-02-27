@@ -811,6 +811,10 @@ def analyze_with_blocks(code: types.CodeType) -> Dict[int, Context]:
                     # 160f2fe2b9 changed SEND stackeffect, resulting in
                     # an extra SWAP 2 + POP_TOP
                     skip_insns += 2
+            if insns[idx + skip_insns].opname == "NOP":
+                # This can show up on 3.11 if the expr in 'async with <expr>
+                # as x:' covers multiple lines
+                skip_insns += 1
             store_to = describe_assignment_target(insns, idx + skip_insns)
             cleanup_offset = start_to_handler[insns[idx + skip_insns].offset]
             with_block_info[cleanup_offset] = Context(
