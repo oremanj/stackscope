@@ -1280,7 +1280,7 @@ def test_greenback() -> None:
                         [
                             (
                                 "greenback_shim",
-                                "return await _greenback_shim(orig_coro)",
+                                "return await _greenback_shim(orig_coro, next_send)",
                                 None,
                                 None,
                             ),
@@ -1334,7 +1334,7 @@ def test_greenback() -> None:
         [
             (
                 "greenback_shim",
-                "return await _greenback_shim(orig_coro)",
+                "return await _greenback_shim(orig_coro, next_send)",
                 None,
                 None,
             ),
@@ -1368,7 +1368,7 @@ def test_greenback() -> None:
         [
             (
                 "greenback_shim",
-                "return await _greenback_shim(orig_coro)",
+                "return await _greenback_shim(orig_coro, next_send)",
                 None,
                 None,
             ),

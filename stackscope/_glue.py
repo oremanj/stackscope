@@ -837,6 +837,23 @@ def glue_greenlet() -> None:
 def glue_greenback() -> None:
     import greenback
 
+    if hasattr(greenback._impl, "trampoline"):
+        @elaborate_frame.register(greenback._impl.trampoline)
+        def elaborate_greenback_shim(frame: Frame, next_inner: object) -> object:
+            frame.hide = True
+            if isinstance(next_inner, Frame):
+                # Coroutine is suspended at an await_(); continue tracing into
+                # it via the greenlet stack
+                return None
+            elif orig_coro := frame.pyframe.f_locals.get("orig_coro"):
+                # Coroutine is suspended at a regular await
+                return orig_coro
+            else:  # pragma: no cover
+                raise RuntimeError(
+                    "Can't identify what's going on with the greenback trampoline "
+                    "in this frame"
+                )
+
     @elaborate_frame.register(greenback._impl._greenback_shim)
     def elaborate_greenback_shim(frame: Frame, next_inner: object) -> object:
         frame.hide = True
