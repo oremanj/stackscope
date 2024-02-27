@@ -842,7 +842,7 @@ def glue_greenback() -> None:
 
         customize(functools.partial.__call__, hide=True)
 
-    if hasattr(greenback._impl, "trampoline"):
+    if hasattr(greenback._impl, "trampoline"):  # pragma: no branch
 
         @elaborate_frame.register(greenback._impl.trampoline)
         def elaborate_trampoline(frame: Frame, next_inner: object) -> object:
